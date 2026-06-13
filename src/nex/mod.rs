@@ -19,4 +19,5 @@ pub fn program_hash<P: Serialize>(program: &P) -> String {
     h.finalize().to_hex().to_string()
 }
 
-pub const NEX_VERSION: &str = "0.2.0";
+pub const NEX_VERSION: &str = "1.0.0";
+pub const NEX_GRAMMAR_VERSION: u32 = 1;

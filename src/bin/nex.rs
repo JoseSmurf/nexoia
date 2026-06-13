@@ -17,6 +17,7 @@ use std::path::Path;
 #[derive(Serialize)]
 struct Output<'a> {
     nex_version: &'static str,
+    nex_grammar_version: u32,
     program_hash: String,
     entries: &'a [nex::TraceEntry],
 }
@@ -35,6 +36,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let execution = nex::execute(program)?;
     let output = Output {
         nex_version: nex::NEX_VERSION,
+        nex_grammar_version: nex::NEX_GRAMMAR_VERSION,
         program_hash,
         entries: &execution.entries,
     };

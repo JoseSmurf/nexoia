@@ -1,0 +1,7 @@
+// nex-version: 1.0.0
+# happy path: ALLOW granted
+let x = node 42 signed
+let y = node 58 signed
+let sum = x derive y as i64
+attest sum with 2 external true
+act decision = allow requires anchored

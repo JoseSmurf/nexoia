@@ -57,6 +57,8 @@ pub struct ActionView {
     pub required_strength: EvidenceStrength,
     pub actual_strength: EvidenceStrength,
     pub granted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,6 +248,7 @@ pub fn expand_program<P: AsRef<Path>>(program: Program, base_dir: P) -> Result<P
 fn execute_expanded(program: Program) -> Result<ExecutionResult, EvalError> {
     let mut working: HashMap<String, RuntimeState> = HashMap::new();
     let mut entries = Vec::new();
+    let mut current_subject: Option<RuntimeState> = None;
 
     for statement in program.statements {
         match statement {
@@ -257,6 +260,7 @@ fn execute_expanded(program: Program) -> Result<ExecutionResult, EvalError> {
             } => {
                 let state = build_node(&id, value, strength, &working)?.into_state();
                 entries.push(TraceEntry::Node(state.view(id.clone())));
+                current_subject = Some(state.clone());
                 working.insert(id, state);
             }
             Stmt::Attest {
@@ -270,6 +274,7 @@ fn execute_expanded(program: Program) -> Result<ExecutionResult, EvalError> {
                     .ok_or_else(|| EvalError::UnknownIdentifier { id: id.clone() })?;
                 let state = attest_node(&id, current, witness_count, external)?;
                 entries.push(TraceEntry::Node(state.view(id.clone())));
+                current_subject = Some(state.clone());
                 working.insert(id, state);
             }
             Stmt::Derive {
@@ -288,6 +293,7 @@ fn execute_expanded(program: Program) -> Result<ExecutionResult, EvalError> {
                     .ok_or_else(|| EvalError::UnknownIdentifier { id: right.clone() })?;
                 let state = derive_node(&id, &left_state, &right_state, ty)?;
                 entries.push(TraceEntry::Node(state.view(id.clone())));
+                current_subject = Some(state.clone());
                 working.insert(id, state);
             }
             Stmt::Assert { id, min } => {
@@ -302,6 +308,7 @@ fn execute_expanded(program: Program) -> Result<ExecutionResult, EvalError> {
                     });
                 }
                 entries.push(TraceEntry::Node(record.view(id)));
+                current_subject = Some(record.clone());
             }
             Stmt::Act {
                 id,
@@ -310,22 +317,12 @@ fn execute_expanded(program: Program) -> Result<ExecutionResult, EvalError> {
             } => {
                 let record = working
                     .get(&id)
+                    .cloned()
+                    .or_else(|| current_subject.clone())
                     .ok_or_else(|| EvalError::UnknownIdentifier { id: id.clone() })?;
                 let actual = record.strength;
                 let decision_id = action_decision_id(&id, action, requires);
                 let granted = actual >= requires;
-                let message = format!(
-                    "{id} requires {requires}, actual strength is {actual}, granted={granted}"
-                );
-
-                if !granted {
-                    return Err(EvalError::ActionDenied {
-                        action,
-                        required: requires,
-                        actual,
-                        message,
-                    });
-                }
 
                 entries.push(TraceEntry::Action(ActionView {
                     id,
@@ -334,6 +331,7 @@ fn execute_expanded(program: Program) -> Result<ExecutionResult, EvalError> {
                     required_strength: requires,
                     actual_strength: actual,
                     granted,
+                    reason: (!granted).then_some("ActionDenied".to_string()),
                 }));
             }
         }
@@ -795,23 +793,21 @@ mod tests {
     }
 
     #[test]
-    fn act_denied_when_strength_is_too_weak() {
+    fn act_denied_when_strength_is_too_weak_records_decision() {
         let program =
             parse("let decision = node 1 signed\nact decision = deny requires anchored\n")
                 .expect("parse");
-        let err = execute(program).expect_err("should fail");
-        match err {
-            super::EvalError::ActionDenied {
-                action,
-                required,
-                actual,
-                ..
-            } => {
-                assert_eq!(action, Action::Deny);
-                assert_eq!(required, EvidenceStrength::Anchored);
-                assert_eq!(actual, EvidenceStrength::Signed);
+        let execution = execute(program).expect("eval");
+
+        match execution.entries.last().expect("action entry") {
+            TraceEntry::Action(view) => {
+                assert_eq!(view.action, Action::Deny);
+                assert!(!view.granted);
+                assert_eq!(view.required_strength, EvidenceStrength::Anchored);
+                assert_eq!(view.actual_strength, EvidenceStrength::Signed);
+                assert_eq!(view.reason.as_deref(), Some("ActionDenied"));
             }
-            other => panic!("unexpected error: {other:?}"),
+            TraceEntry::Node(_) => panic!("expected action entry"),
         }
     }
 

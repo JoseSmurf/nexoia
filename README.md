@@ -49,3 +49,30 @@ From lowest to highest, NexoIA uses these five levels:
 5. `Anchored`
 
 The ordering matters because stronger evidence wins when quality diverges.
+
+## nex language
+
+nex is the small deterministic language inside this crate for expressing typed
+evidence nodes, witness upgrades, imports, assertions, and final action
+decisions. Version `1.0.0` is the stable language contract.
+
+| Construct | Purpose |
+| --- | --- |
+| `// nex-version: 1.0.0` | Optional source version gate. |
+| `use path` | Imports another `.nex` program by dot path. |
+| `let id = node expr strength` | Creates a typed evidence node. |
+| `let id = left derive right as type` | Derives a value from two nodes. |
+| `attest id with n external bool` | Upgrades signed evidence with witnesses. |
+| `assert id >= strength` | Fails unless evidence is strong enough. |
+| `act id = action requires strength` | Records an allow, deny, or escalate decision. |
+
+Quick start:
+
+```bash
+cargo run --bin nex -- examples/hello.nex
+```
+
+Language references:
+
+- [nex grammar](docs/NEX_GRAMMAR.md)
+- [nex semantics](docs/NEX_SEMANTICS.md)

@@ -2,18 +2,27 @@ use crate::quality::EvidenceStrength;
 use std::error::Error;
 use std::fmt;
 
-use super::ast::{Action, Expr, Program, Stmt, Type};
+use super::{
+    ast::{Action, Expr, Program, Stmt, Type},
+    NEX_VERSION,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParseError {
-    pub line: usize,
-    pub column: usize,
-    pub message: String,
+pub enum ParseError {
+    Syntax {
+        line: usize,
+        column: usize,
+        message: String,
+    },
+    UnsupportedVersion {
+        found: String,
+        supported: String,
+    },
 }
 
 impl ParseError {
     fn new(line: usize, column: usize, message: impl Into<String>) -> Self {
-        Self {
+        Self::Syntax {
             line,
             column,
             message: message.into(),
@@ -23,7 +32,19 @@ impl ParseError {
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "line {}:{}: {}", self.line, self.column, self.message)
+        match self {
+            Self::Syntax {
+                line,
+                column,
+                message,
+            } => write!(f, "line {line}:{column}: {message}"),
+            Self::UnsupportedVersion { found, supported } => {
+                write!(
+                    f,
+                    "unsupported nex version '{found}', supported version is '{supported}'"
+                )
+            }
+        }
     }
 }
 
@@ -58,17 +79,50 @@ impl TokenKind {
 
 pub fn parse(source: &str) -> Result<Program, ParseError> {
     let mut statements = Vec::new();
+    let mut first_statement_seen = false;
 
     for (line_idx, raw_line) in source.lines().enumerate() {
         let line_no = line_idx + 1;
+        let trimmed = raw_line.trim_start();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if !first_statement_seen {
+            if let Some(found) = parse_version_header(trimmed) {
+                if found != NEX_VERSION {
+                    return Err(ParseError::UnsupportedVersion {
+                        found,
+                        supported: NEX_VERSION.to_string(),
+                    });
+                }
+                continue;
+            }
+
+            if is_comment_line(trimmed) {
+                continue;
+            }
+        }
+
         let tokens = lex_line(raw_line, line_no)?;
         if tokens.is_empty() {
             continue;
         }
+        first_statement_seen = true;
         statements.push(parse_statement(&tokens, line_no)?);
     }
 
     Ok(Program { statements })
+}
+
+fn parse_version_header(line: &str) -> Option<String> {
+    let header = line.strip_prefix("//")?.trim_start();
+    let version = header.strip_prefix("nex-version:")?;
+    Some(version.trim().to_string())
+}
+
+fn is_comment_line(line: &str) -> bool {
+    line.starts_with('#') || line.starts_with("//")
 }
 
 fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
@@ -82,7 +136,7 @@ fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
             idx += 1;
             continue;
         }
-        if ch == '#' {
+        if ch == '#' || (ch == '/' && chars.get(idx + 1) == Some(&'/')) {
             break;
         }
 
@@ -198,6 +252,7 @@ fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
                         || next == '='
                         || next == '"'
                         || next == '>'
+                        || (next == '/' && chars.get(idx + 1) == Some(&'/'))
                     {
                         break;
                     }
@@ -630,7 +685,7 @@ fn ensure_end(tokens: &[Token], idx: usize, line_no: usize) -> Result<(), ParseE
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{parse, ParseError};
     use crate::nex::ast::{Action, Expr, Stmt, Type};
     use crate::quality::EvidenceStrength;
 
@@ -726,6 +781,19 @@ mod tests {
             program.statements[0],
             Stmt::Use { ref path } if path == "lib.risk"
         ));
+    }
+
+    #[test]
+    fn rejects_unsupported_version_header() {
+        let err = parse("// nex-version: 0.5.0\nlet x = node 1 signed")
+            .expect_err("version should be rejected");
+        assert_eq!(
+            err,
+            ParseError::UnsupportedVersion {
+                found: "0.5.0".to_string(),
+                supported: "1.0.0".to_string(),
+            }
+        );
     }
 
     #[test]

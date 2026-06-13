@@ -1,0 +1,4 @@
+// nex-version: 1.0.0
+# insufficient strength, DENY returned (action denied)
+let x = node 10 local
+act decision = deny requires signed

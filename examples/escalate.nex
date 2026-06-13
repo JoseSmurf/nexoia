@@ -1,0 +1,4 @@
+// nex-version: 1.0.0
+# witnessed < signed, ESCALATE returned
+let x = node 10 witnessed
+act decision = escalate requires signed

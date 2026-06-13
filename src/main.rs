@@ -3,6 +3,7 @@ mod evidence;
 mod hash;
 mod quality;
 mod state;
+mod sync;
 
 use crate::decision::{DecisionRecord, DecisionStatus};
 use crate::hash::canonical_hash;

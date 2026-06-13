@@ -16,3 +16,7 @@ tempfile = "3"
 [[bin]]
 name = "verify"
 path = "src/bin/verify.rs"
+
+[[bin]]
+name = "nex"
+path = "src/bin/nex.rs"

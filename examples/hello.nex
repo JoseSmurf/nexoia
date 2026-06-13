@@ -1,0 +1,3 @@
+let sum = node 1 signed
+attest sum with 2 external true
+assert sum >= anchored

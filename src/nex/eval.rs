@@ -1,4 +1,4 @@
-use crate::nex::ast::{Expr, Program, Stmt, Type};
+use crate::nex::ast::{Action, Expr, Program, Stmt, Type};
 use crate::provenance::typed_node::Marker;
 use crate::provenance::{
     Anchored, InsufficientWitnessesError, Local, Signed, TypedNode, Unverifiable, Witness,
@@ -48,9 +48,26 @@ pub struct NodeView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionView {
+    pub id: String,
+    pub decision_id: Uuid,
+    pub action: Action,
+    pub required_strength: EvidenceStrength,
+    pub actual_strength: EvidenceStrength,
+    pub granted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TraceEntry {
+    Node(NodeView),
+    Action(ActionView),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionResult {
     pub env: Env,
-    pub entries: Vec<NodeView>,
+    pub entries: Vec<TraceEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +96,12 @@ pub enum EvalError {
         expected: &'static str,
         actual_left: &'static str,
         actual_right: &'static str,
+    },
+    ActionDenied {
+        action: Action,
+        required: EvidenceStrength,
+        actual: EvidenceStrength,
+        message: String,
     },
 }
 
@@ -110,6 +133,15 @@ impl fmt::Display for EvalError {
                 f,
                 "derive '{id}' type mismatch: expected {expected}, left was {actual_left}, right was {actual_right}"
             ),
+            Self::ActionDenied {
+                action,
+                required,
+                actual,
+                message,
+            } => write!(
+                f,
+                "action {action} denied: actual {actual} does not meet required {required}: {message}"
+            ),
         }
     }
 }
@@ -131,6 +163,19 @@ fn node_view(
 }
 
 #[derive(Debug, Clone)]
+struct RuntimeState {
+    node_id: Uuid,
+    value: TypedNodeValue,
+    strength: EvidenceStrength,
+}
+
+impl RuntimeState {
+    fn view(&self, id: String) -> NodeView {
+        node_view(id, self.node_id, self.value.clone(), self.strength)
+    }
+}
+
+#[derive(Debug, Clone)]
 struct NodeRecord {
     node_id: Uuid,
     value: TypedNodeValue,
@@ -138,8 +183,12 @@ struct NodeRecord {
 }
 
 impl NodeRecord {
-    fn view(&self, id: String) -> NodeView {
-        node_view(id, self.node_id, self.value.clone(), self.strength)
+    fn into_state(self) -> RuntimeState {
+        RuntimeState {
+            node_id: self.node_id,
+            value: self.value,
+            strength: self.strength,
+        }
     }
 }
 
@@ -148,7 +197,7 @@ pub fn eval(program: Program) -> Result<Env, EvalError> {
 }
 
 pub fn execute(program: Program) -> Result<ExecutionResult, EvalError> {
-    let mut working: HashMap<String, NodeRecord> = HashMap::new();
+    let mut working: HashMap<String, RuntimeState> = HashMap::new();
     let mut entries = Vec::new();
 
     for statement in program.statements {
@@ -158,9 +207,9 @@ pub fn execute(program: Program) -> Result<ExecutionResult, EvalError> {
                 value,
                 strength,
             } => {
-                let record = build_node(&id, value, strength, &working)?;
-                entries.push(record.view(id.clone()));
-                working.insert(id, record);
+                let state = build_node(&id, value, strength, &working)?.into_state();
+                entries.push(TraceEntry::Node(state.view(id.clone())));
+                working.insert(id, state);
             }
             Stmt::Attest {
                 id,
@@ -168,11 +217,12 @@ pub fn execute(program: Program) -> Result<ExecutionResult, EvalError> {
                 external,
             } => {
                 let current = working
-                    .remove(&id)
+                    .get(&id)
+                    .cloned()
                     .ok_or_else(|| EvalError::UnknownIdentifier { id: id.clone() })?;
-                let record = attest_node(&id, current, witness_count, external)?;
-                entries.push(record.view(id.clone()));
-                working.insert(id, record);
+                let state = attest_node(&id, current, witness_count, external)?;
+                entries.push(TraceEntry::Node(state.view(id.clone())));
+                working.insert(id, state);
             }
             Stmt::Derive {
                 id,
@@ -180,15 +230,17 @@ pub fn execute(program: Program) -> Result<ExecutionResult, EvalError> {
                 right,
                 ty,
             } => {
-                let left_record = working
+                let left_state = working
                     .get(&left)
+                    .cloned()
                     .ok_or_else(|| EvalError::UnknownIdentifier { id: left.clone() })?;
-                let right_record = working
+                let right_state = working
                     .get(&right)
+                    .cloned()
                     .ok_or_else(|| EvalError::UnknownIdentifier { id: right.clone() })?;
-                let record = derive_node(&id, left_record, right_record, ty)?;
-                entries.push(record.view(id.clone()));
-                working.insert(id, record);
+                let state = derive_node(&id, &left_state, &right_state, ty)?;
+                entries.push(TraceEntry::Node(state.view(id.clone())));
+                working.insert(id, state);
             }
             Stmt::Assert { id, min } => {
                 let record = working
@@ -201,7 +253,40 @@ pub fn execute(program: Program) -> Result<ExecutionResult, EvalError> {
                         expected: min,
                     });
                 }
-                entries.push(record.view(id));
+                entries.push(TraceEntry::Node(record.view(id)));
+            }
+            Stmt::Act {
+                id,
+                action,
+                requires,
+            } => {
+                let record = working
+                    .get(&id)
+                    .ok_or_else(|| EvalError::UnknownIdentifier { id: id.clone() })?;
+                let actual = record.strength;
+                let decision_id = action_decision_id(&id, action, requires);
+                let granted = actual >= requires;
+                let message = format!(
+                    "{id} requires {requires}, actual strength is {actual}, granted={granted}"
+                );
+
+                if !granted {
+                    return Err(EvalError::ActionDenied {
+                        action,
+                        required: requires,
+                        actual,
+                        message,
+                    });
+                }
+
+                entries.push(TraceEntry::Action(ActionView {
+                    id,
+                    decision_id,
+                    action,
+                    required_strength: requires,
+                    actual_strength: actual,
+                    granted,
+                }));
             }
         }
     }
@@ -218,7 +303,7 @@ fn build_node(
     id: &str,
     value: Expr,
     strength: EvidenceStrength,
-    env: &HashMap<String, NodeRecord>,
+    env: &HashMap<String, RuntimeState>,
 ) -> Result<NodeRecord, EvalError> {
     let resolved = resolve_expr(value, env)?;
     let node_id = deterministic_node_id(id, &resolved);
@@ -246,10 +331,10 @@ fn build_node(
 
 fn attest_node(
     id: &str,
-    current: NodeRecord,
+    current: RuntimeState,
     witness_count: usize,
     external: bool,
-) -> Result<NodeRecord, EvalError> {
+) -> Result<RuntimeState, EvalError> {
     if current.strength != EvidenceStrength::Signed {
         return Err(EvalError::AttestationRequiresSigned {
             id: id.to_string(),
@@ -266,15 +351,15 @@ fn attest_node(
             source,
         })?;
 
-    Ok(snapshot_from_node(anchored))
+    Ok(snapshot_from_node(anchored).into_state())
 }
 
 fn derive_node(
     id: &str,
-    left: &NodeRecord,
-    right: &NodeRecord,
+    left: &RuntimeState,
+    right: &RuntimeState,
     ty: Type,
-) -> Result<NodeRecord, EvalError> {
+) -> Result<RuntimeState, EvalError> {
     match (left.strength, right.strength) {
         (EvidenceStrength::Unverifiable, EvidenceStrength::Unverifiable) => {
             derive_with_markers::<Unverifiable, Unverifiable>(id, left, right, ty)
@@ -356,10 +441,10 @@ fn derive_node(
 
 fn derive_with_markers<L, R>(
     id: &str,
-    left: &NodeRecord,
-    right: &NodeRecord,
+    left: &RuntimeState,
+    right: &RuntimeState,
     ty: Type,
-) -> Result<NodeRecord, EvalError>
+) -> Result<RuntimeState, EvalError>
 where
     L: Marker + crate::provenance::MinStrength<R>,
     R: Marker,
@@ -375,7 +460,12 @@ where
                     }
                     _ => unreachable!("type checked before derive"),
                 });
-                Ok(snapshot_from_node(derived))
+                let strength = derived.strength();
+                Ok(RuntimeState {
+                    node_id: derived.node_id,
+                    value: derived.value,
+                    strength,
+                })
             }
             _ => Err(EvalError::TypeMismatch {
                 id: id.to_string(),
@@ -394,7 +484,12 @@ where
                     }
                     _ => unreachable!("type checked before derive"),
                 });
-                Ok(snapshot_from_node(derived))
+                let strength = derived.strength();
+                Ok(RuntimeState {
+                    node_id: derived.node_id,
+                    value: derived.value,
+                    strength,
+                })
             }
             _ => Err(EvalError::TypeMismatch {
                 id: id.to_string(),
@@ -408,7 +503,7 @@ where
 
 fn resolve_expr(
     expr: Expr,
-    env: &HashMap<String, NodeRecord>,
+    env: &HashMap<String, RuntimeState>,
 ) -> Result<TypedNodeValue, EvalError> {
     match expr {
         Expr::IntLit(value) => Ok(TypedNodeValue::I(value)),
@@ -458,6 +553,11 @@ fn synthetic_witness_set(node_id: Uuid, witness_count: usize, external: bool) ->
     set
 }
 
+fn action_decision_id(id: &str, action: Action, required: EvidenceStrength) -> Uuid {
+    let seed = format!("nex-act|{id}|{action}|{required}");
+    Uuid::new_v5(&Uuid::NAMESPACE_URL, seed.as_bytes())
+}
+
 pub fn eval_source(source: &str) -> Result<Env, EvalError> {
     let program = super::parse(source).map_err(|err| EvalError::TypeMismatch {
         id: format!("parse-error:{err}"),
@@ -470,22 +570,51 @@ pub fn eval_source(source: &str) -> Result<Env, EvalError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{eval, execute, TypedNodeValue};
+    use super::{eval, execute, ActionView, TraceEntry, TypedNodeValue};
+    use crate::nex::ast::Action;
     use crate::nex::parse;
     use crate::quality::EvidenceStrength;
+    use uuid::Uuid;
 
     #[test]
-    fn hello_example_produces_three_entries_and_anchored_sum() {
+    fn hello_example_produces_four_entries_and_anchored_sum() {
         let source = include_str!("../../examples/hello.nex");
         let program = parse(source).expect("hello.nex should parse");
         let execution = execute(program).expect("hello.nex should evaluate");
 
-        assert_eq!(execution.entries.len(), 3);
-        assert_eq!(
-            execution.entries.last().expect("assert entry").strength,
-            EvidenceStrength::Anchored
-        );
+        assert_eq!(execution.entries.len(), 4);
         assert_eq!(execution.env.get("sum"), Some(&TypedNodeValue::I(1)));
+        assert!(matches!(
+            execution.entries[0],
+            TraceEntry::Node(ref node) if node.strength == EvidenceStrength::Signed
+        ));
+        assert!(matches!(
+            execution.entries[1],
+            TraceEntry::Node(ref node) if node.strength == EvidenceStrength::Anchored
+        ));
+        assert!(matches!(
+            execution.entries[2],
+            TraceEntry::Node(ref node) if node.strength == EvidenceStrength::Anchored
+        ));
+        assert!(matches!(
+            execution.entries[3],
+            TraceEntry::Action(ActionView {
+                action: Action::Allow,
+                required_strength: EvidenceStrength::Anchored,
+                actual_strength: EvidenceStrength::Anchored,
+                granted: true,
+                ..
+            })
+        ));
+
+        if let TraceEntry::Action(action) = &execution.entries[3] {
+            assert_eq!(
+                action.decision_id,
+                Uuid::new_v5(&Uuid::NAMESPACE_URL, b"nex-act|sum|allow|ANCHORED")
+            );
+        } else {
+            panic!("expected action entry");
+        }
     }
 
     #[test]
@@ -497,10 +626,10 @@ mod tests {
         let execution = execute(program).expect("eval");
 
         assert_eq!(execution.env.get("total"), Some(&TypedNodeValue::I(3)));
-        assert_eq!(
-            execution.entries.last().unwrap().strength,
-            EvidenceStrength::Anchored
-        );
+        assert!(matches!(
+            execution.entries.last().expect("derive entry"),
+            TraceEntry::Node(node) if node.strength == EvidenceStrength::Anchored
+        ));
     }
 
     #[test]
@@ -508,5 +637,44 @@ mod tests {
         let program = parse("let sum = node 7 signed\n").expect("parse");
         let env = eval(program).expect("eval");
         assert_eq!(env.get("sum"), Some(&TypedNodeValue::I(7)));
+    }
+
+    #[test]
+    fn act_emits_action_entry_when_strength_is_sufficient() {
+        let program =
+            parse("let decision = node 1 anchored\nact decision = allow requires signed\n")
+                .expect("parse");
+        let execution = execute(program).expect("eval");
+
+        match execution.entries.last().expect("action entry") {
+            TraceEntry::Action(action) => {
+                assert_eq!(action.action, Action::Allow);
+                assert!(action.granted);
+                assert_eq!(action.required_strength, EvidenceStrength::Signed);
+                assert_eq!(action.actual_strength, EvidenceStrength::Anchored);
+            }
+            TraceEntry::Node(_) => panic!("expected action entry"),
+        }
+    }
+
+    #[test]
+    fn act_denied_when_strength_is_too_weak() {
+        let program =
+            parse("let decision = node 1 signed\nact decision = deny requires anchored\n")
+                .expect("parse");
+        let err = execute(program).expect_err("should fail");
+        match err {
+            super::EvalError::ActionDenied {
+                action,
+                required,
+                actual,
+                ..
+            } => {
+                assert_eq!(action, Action::Deny);
+                assert_eq!(required, EvidenceStrength::Anchored);
+                assert_eq!(actual, EvidenceStrength::Signed);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

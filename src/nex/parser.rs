@@ -2,7 +2,7 @@ use crate::quality::EvidenceStrength;
 use std::error::Error;
 use std::fmt;
 
-use super::ast::{Expr, Program, Stmt, Type};
+use super::ast::{Action, Expr, Program, Stmt, Type};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
@@ -234,6 +234,7 @@ fn parse_statement(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError>
         "let" => parse_let(tokens, line_no),
         "attest" => parse_attest(tokens, line_no),
         "assert" => parse_assert(tokens, line_no),
+        "act" => parse_act(tokens, line_no),
         other => Err(ParseError::new(
             line_no,
             first.column,
@@ -430,6 +431,46 @@ fn parse_assert(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError> {
     Ok(Stmt::Assert { id, min })
 }
 
+fn parse_act(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError> {
+    let id = expect_word(tokens, 1, line_no, "expected identifier after 'act'")?;
+    expect_eq(tokens, 2, line_no, "expected '=' after identifier")?;
+    let action_token = tokens.get(3).ok_or_else(|| {
+        ParseError::new(line_no, tokens[2].column + 1, "missing action after '='")
+    })?;
+    let action = parse_action(action_token, line_no)?;
+
+    let requires_token = tokens.get(4).ok_or_else(|| {
+        ParseError::new(
+            line_no,
+            action_token.column,
+            "expected 'requires' after action",
+        )
+    })?;
+    if word(requires_token, line_no)?.to_ascii_lowercase() != "requires" {
+        return Err(ParseError::new(
+            line_no,
+            requires_token.column,
+            "expected 'requires' after action",
+        ));
+    }
+
+    let strength_token = tokens.get(5).ok_or_else(|| {
+        ParseError::new(
+            line_no,
+            requires_token.column,
+            "missing strength after 'requires'",
+        )
+    })?;
+    let requires = parse_strength(strength_token, line_no)?;
+    ensure_end(tokens, 6, line_no)?;
+
+    Ok(Stmt::Act {
+        id,
+        action,
+        requires,
+    })
+}
+
 fn parse_expr(token: &Token) -> Result<Expr, ParseError> {
     Ok(match &token.kind {
         TokenKind::Int(value) => Expr::IntLit(*value),
@@ -443,6 +484,20 @@ fn parse_expr(token: &Token) -> Result<Expr, ParseError> {
             ))
         }
     })
+}
+
+fn parse_action(token: &Token, line_no: usize) -> Result<Action, ParseError> {
+    let value = word(token, line_no)?.to_ascii_lowercase();
+    match value.as_str() {
+        "allow" => Ok(Action::Allow),
+        "deny" => Ok(Action::Deny),
+        "escalate" => Ok(Action::Escalate),
+        other => Err(ParseError::new(
+            line_no,
+            token.column,
+            format!("unknown action '{other}'"),
+        )),
+    }
 }
 
 fn parse_type(token: &Token, line_no: usize) -> Result<Type, ParseError> {
@@ -544,7 +599,7 @@ fn ensure_end(tokens: &[Token], idx: usize, line_no: usize) -> Result<(), ParseE
 #[cfg(test)]
 mod tests {
     use super::parse;
-    use crate::nex::ast::{Expr, Stmt, Type};
+    use crate::nex::ast::{Action, Expr, Stmt, Type};
     use crate::quality::EvidenceStrength;
 
     #[test]
@@ -614,6 +669,19 @@ mod tests {
     }
 
     #[test]
+    fn parses_act_construct() {
+        let program = parse("act decision = deny requires signed").expect("parse");
+        assert!(matches!(
+            program.statements[0],
+            Stmt::Act {
+                id: ref name,
+                action: Action::Deny,
+                requires: EvidenceStrength::Signed,
+            } if name == "decision"
+        ));
+    }
+
+    #[test]
     fn parses_comment_construct() {
         let program = parse("  # comment only").expect("parse");
         assert!(program.statements.is_empty());
@@ -637,5 +705,11 @@ mod tests {
         assert!(err
             .to_string()
             .contains("expected 'external' after witness count"));
+    }
+
+    #[test]
+    fn missing_requires_keyword_after_act_errors() {
+        let err = parse("act decision = deny signed").expect_err("missing requires keyword");
+        assert!(err.to_string().contains("expected 'requires' after action"));
     }
 }

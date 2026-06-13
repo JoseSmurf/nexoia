@@ -1,9 +1,29 @@
 use crate::quality::EvidenceStrength;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Program {
     pub statements: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum Action {
+    Allow,
+    Deny,
+    Escalate,
+}
+
+impl fmt::Display for Action {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::Allow => "allow",
+            Self::Deny => "deny",
+            Self::Escalate => "escalate",
+        };
+        f.write_str(value)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,6 +47,11 @@ pub enum Stmt {
     Assert {
         id: String,
         min: EvidenceStrength,
+    },
+    Act {
+        id: String,
+        action: Action,
+        requires: EvidenceStrength,
     },
 }
 

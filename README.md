@@ -1,30 +1,22 @@
 # nexoia
 
-`nexoia` is a small Rust project that generates deterministic decision artifacts.
+NexoIA e um projeto Rust pequeno que gera artefatos deterministas de decisao.
+Ele calcula hashes canonicos com BLAKE3, registra evidencias em JSONL e monta um manifest com os hashes dos arquivos gerados.
+A saida foi desenhada para ser previsivel, auditavel e facil de inspecionar.
 
-## Output
+## Como rodar
 
-Running `cargo run` creates these files in the project root:
+```bash
+cargo run
+```
 
-- `state.json`
-- `evidence.jsonl`
-- `decisions.jsonl`
-- `manifest.json`
+## Arquivos gerados
 
-## Status values
+- `state.json` - estado de entrada normalizado usado na execucao.
+- `evidence.jsonl` - trilha de evidencias com hash deterministico por linha.
+- `decisions.jsonl` - registro das decisoes produzidas pela avaliacao.
+- `manifest.json` - resumo final com status, motivo e hashes dos artefatos.
 
-- `OK`
-- `VIOLACAO`
-- `ABSTERSE`
+## Frase
 
-## Environment variables
-
-- `NEXOIA_SCENARIO` - `auto`, `ok`, `violacao`, or `absterse`
-- `NEXOIA_THRESHOLD` - numeric threshold, default `50`
-- `NEXOIA_INPUT_VALUE` - optional numeric input, default `60`
-- `NEXOIA_SUBJECT` - subject label, default `default-evaluation`
-
-## Notes
-
-- Evidence records include deterministic BLAKE3 hashes of their canonical JSON content.
-- The manifest records hashes for all generated artifact files.
+> "Uma EPA é um objeto que consegue lembrar por que acredita no que acredita."

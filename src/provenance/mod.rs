@@ -1,7 +1,11 @@
 pub mod aggregator;
+pub mod compose;
 pub mod signing;
 pub mod typed_node;
 pub mod witness;
+
+#[allow(unused_imports)]
+pub use compose::{derive, MinStrength};
 
 #[allow(unused_imports)]
 pub use typed_node::{

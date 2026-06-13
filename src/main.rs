@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     write_text("state.json", &state_json)?;
     let state_hash = canonical_hash(&state_json);
 
-    let decision = decision::evaluate(&state, state_hash.clone())?;
+    let decision = decision::evaluate(&state, state_hash.clone(), "signed", "local")?;
     let evidence_records = evidence::build_records(&state, &decision)?;
 
     let evidence_jsonl = write_jsonl_string(&evidence_records)?;

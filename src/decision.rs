@@ -68,12 +68,17 @@ impl DecisionRecord {
     }
 }
 
-pub fn evaluate(state: &State, state_hash: String) -> Result<DecisionRecord, serde_json::Error> {
+pub fn evaluate(
+    state: &State,
+    state_hash: String,
+    left_kind: &str,
+    right_kind: &str,
+) -> Result<DecisionRecord, serde_json::Error> {
     let created_at_utc = Utc::now();
     let decision_id = Uuid::new_v5(&state.run_id, b"decision");
     let (status, reason_code, message) = classify(state);
-    let left_strength = quality_evaluate(&state_hash, "signed");
-    let right_strength = quality_evaluate(&state_hash, "local");
+    let left_strength = quality_evaluate(&state_hash, left_kind);
+    let right_strength = quality_evaluate(&state_hash, right_kind);
     let quality_report = crate::quality::resolve_quality_divergence(left_strength, right_strength);
     let body = DecisionBody {
         decision_id,
@@ -171,9 +176,10 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_produces_hash() {
+    fn evaluate_uses_dynamic_kinds_signed_vs_local() {
         let state = sample_state(Scenario::Ok, Some(60));
-        let decision = evaluate(&state, "state_hash".to_string()).expect("decision");
+        let decision =
+            evaluate(&state, "state_hash".to_string(), "signed", "local").expect("decision");
         assert!(!decision.hash.is_empty());
         assert_eq!(decision.body.status, DecisionStatus::Ok);
         assert_eq!(
@@ -185,5 +191,39 @@ mod tests {
             crate::quality::EvidenceStrength::Local
         );
         assert!(!decision.body.quality_report.resolution_hash.is_empty());
+    }
+
+    #[test]
+    fn evaluate_uses_dynamic_kinds_witness_vs_anchored() {
+        let state = sample_state(Scenario::Ok, Some(60));
+        let decision =
+            evaluate(&state, "state_hash".to_string(), "witness", "anchored").expect("decision");
+        assert_eq!(
+            decision.body.quality_left_strength,
+            crate::quality::EvidenceStrength::Witnessed
+        );
+        assert_eq!(
+            decision.body.quality_right_strength,
+            crate::quality::EvidenceStrength::Anchored
+        );
+        assert_eq!(decision.body.quality_report.chosen_side, "right");
+        assert_eq!(decision.body.quality_report.reason_code, "RIGHT_STRONGER");
+    }
+
+    #[test]
+    fn evaluate_uses_dynamic_kinds_tie_on_equal_strength() {
+        let state = sample_state(Scenario::Ok, Some(60));
+        let decision =
+            evaluate(&state, "state_hash".to_string(), "signed", "signed").expect("decision");
+        assert_eq!(decision.body.quality_report.chosen_side, "tie");
+        assert_eq!(decision.body.quality_report.reason_code, "EQUAL_STRENGTH");
+        assert_eq!(
+            decision.body.quality_left_strength,
+            crate::quality::EvidenceStrength::Signed
+        );
+        assert_eq!(
+            decision.body.quality_right_strength,
+            crate::quality::EvidenceStrength::Signed
+        );
     }
 }

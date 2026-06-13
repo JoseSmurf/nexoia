@@ -126,7 +126,8 @@ mod tests {
     #[test]
     fn build_records_creates_two_evidence_lines() {
         let state = sample_state();
-        let decision = evaluate(&state, "state_hash".to_string()).expect("decision");
+        let decision =
+            evaluate(&state, "state_hash".to_string(), "signed", "local").expect("decision");
         let records = build_records(&state, &decision).expect("records");
         assert_eq!(records.len(), 2);
         assert!(!records[0].hash.is_empty());

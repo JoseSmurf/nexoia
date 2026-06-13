@@ -1,4 +1,5 @@
 use crate::hash::canonical_hash;
+use crate::quality::{evaluate as quality_evaluate, EvidenceStrength, ResolutionReport};
 use crate::state::{Scenario, State};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,9 @@ pub struct DecisionBody {
     pub reason_code: String,
     pub message: String,
     pub state_hash: String,
+    pub quality_left_strength: EvidenceStrength,
+    pub quality_right_strength: EvidenceStrength,
+    pub quality_report: ResolutionReport,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +72,9 @@ pub fn evaluate(state: &State, state_hash: String) -> Result<DecisionRecord, ser
     let created_at_utc = Utc::now();
     let decision_id = Uuid::new_v5(&state.run_id, b"decision");
     let (status, reason_code, message) = classify(state);
+    let left_strength = quality_evaluate(&state_hash, "signed");
+    let right_strength = quality_evaluate(&state_hash, "local");
+    let quality_report = crate::quality::resolve_quality_divergence(left_strength, right_strength);
     let body = DecisionBody {
         decision_id,
         run_id: state.run_id,
@@ -76,6 +83,9 @@ pub fn evaluate(state: &State, state_hash: String) -> Result<DecisionRecord, ser
         reason_code,
         message,
         state_hash,
+        quality_left_strength: left_strength,
+        quality_right_strength: right_strength,
+        quality_report,
     };
     DecisionRecord::new(body)
 }
@@ -166,5 +176,14 @@ mod tests {
         let decision = evaluate(&state, "state_hash".to_string()).expect("decision");
         assert!(!decision.hash.is_empty());
         assert_eq!(decision.body.status, DecisionStatus::Ok);
+        assert_eq!(
+            decision.body.quality_left_strength,
+            crate::quality::EvidenceStrength::Signed
+        );
+        assert_eq!(
+            decision.body.quality_right_strength,
+            crate::quality::EvidenceStrength::Local
+        );
+        assert!(!decision.body.quality_report.resolution_hash.is_empty());
     }
 }

@@ -1,6 +1,7 @@
 mod decision;
 mod evidence;
 mod hash;
+mod quality;
 mod state;
 
 use crate::decision::{DecisionRecord, DecisionStatus};

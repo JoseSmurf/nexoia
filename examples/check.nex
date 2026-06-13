@@ -1,0 +1,6 @@
+# check.nex - uses lib/risk
+use lib.risk
+let user_score = node 750 signed
+let verdict = user_score derive threshold as i64
+let decision = verdict derive threshold as i64
+act decision = allow requires signed

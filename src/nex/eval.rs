@@ -7,9 +7,11 @@ use crate::provenance::{
 use crate::quality::EvidenceStrength;
 use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
+use std::fs;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 pub type Env = HashMap<String, TypedNodeValue>;
@@ -75,6 +77,16 @@ pub enum EvalError {
     UnknownIdentifier {
         id: String,
     },
+    MissingImport {
+        path: String,
+    },
+    CircularImport {
+        chain: Vec<String>,
+    },
+    ImportError {
+        path: String,
+        message: String,
+    },
     AttestationRequiresSigned {
         id: String,
         actual: EvidenceStrength,
@@ -109,6 +121,13 @@ impl fmt::Display for EvalError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownIdentifier { id } => write!(f, "unknown identifier '{id}'"),
+            Self::MissingImport { path } => write!(f, "missing import '{path}'"),
+            Self::CircularImport { chain } => {
+                write!(f, "circular import detected: {}", chain.join(" -> "))
+            }
+            Self::ImportError { path, message } => {
+                write!(f, "failed to import '{path}': {message}")
+            }
             Self::AttestationRequiresSigned { id, actual } => {
                 write!(f, "attest '{id}' requires Signed, found {actual}")
             }
@@ -193,15 +212,44 @@ impl NodeRecord {
 }
 
 pub fn eval(program: Program) -> Result<Env, EvalError> {
-    execute(program).map(|result| result.env)
+    eval_in_dir(program, Path::new("."))
+}
+
+pub fn eval_in_dir<P: AsRef<Path>>(program: Program, base_dir: P) -> Result<Env, EvalError> {
+    execute_in_dir(program, base_dir).map(|result| result.env)
 }
 
 pub fn execute(program: Program) -> Result<ExecutionResult, EvalError> {
+    execute_in_dir(program, Path::new("."))
+}
+
+pub fn execute_in_dir<P: AsRef<Path>>(
+    program: Program,
+    base_dir: P,
+) -> Result<ExecutionResult, EvalError> {
+    let program = expand_program(program, base_dir)?;
+    execute_expanded(program)
+}
+
+pub fn expand_program<P: AsRef<Path>>(program: Program, base_dir: P) -> Result<Program, EvalError> {
+    let mut visited = HashSet::new();
+    let mut stack = Vec::new();
+    let statements = expand_statements(
+        program.statements,
+        base_dir.as_ref(),
+        &mut visited,
+        &mut stack,
+    )?;
+    Ok(Program { statements })
+}
+
+fn execute_expanded(program: Program) -> Result<ExecutionResult, EvalError> {
     let mut working: HashMap<String, RuntimeState> = HashMap::new();
     let mut entries = Vec::new();
 
     for statement in program.statements {
         match statement {
+            Stmt::Use { .. } => unreachable!("imports must be expanded before evaluation"),
             Stmt::Node {
                 id,
                 value,
@@ -297,6 +345,93 @@ pub fn execute(program: Program) -> Result<ExecutionResult, EvalError> {
         .collect();
 
     Ok(ExecutionResult { env, entries })
+}
+
+fn expand_statements(
+    statements: Vec<Stmt>,
+    base_dir: &Path,
+    visited: &mut HashSet<PathBuf>,
+    stack: &mut Vec<PathBuf>,
+) -> Result<Vec<Stmt>, EvalError> {
+    let mut imports = Vec::new();
+    let mut body = Vec::new();
+
+    for statement in statements {
+        match statement {
+            Stmt::Use { path } => imports.push(path),
+            other => body.push(other),
+        }
+    }
+
+    let mut expanded = Vec::new();
+
+    for import in imports {
+        let path = resolve_import_path(base_dir, &import);
+        expanded.extend(load_import(&path, visited, stack)?);
+    }
+
+    expanded.extend(body);
+    Ok(expanded)
+}
+
+fn load_import(
+    path: &Path,
+    visited: &mut HashSet<PathBuf>,
+    stack: &mut Vec<PathBuf>,
+) -> Result<Vec<Stmt>, EvalError> {
+    let path = path.to_path_buf();
+
+    if let Some(start) = stack.iter().position(|item| item == &path) {
+        let mut chain = stack[start..]
+            .iter()
+            .map(|item| item.display().to_string())
+            .collect::<Vec<_>>();
+        chain.push(path.display().to_string());
+        return Err(EvalError::CircularImport { chain });
+    }
+
+    if visited.contains(&path) {
+        return Ok(Vec::new());
+    }
+
+    let source = fs::read_to_string(&path).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            EvalError::MissingImport {
+                path: path.display().to_string(),
+            }
+        } else {
+            EvalError::ImportError {
+                path: path.display().to_string(),
+                message: err.to_string(),
+            }
+        }
+    })?;
+
+    stack.push(path.clone());
+    let result = (|| -> Result<Vec<Stmt>, EvalError> {
+        let program = super::parse(&source).map_err(|err| EvalError::ImportError {
+            path: path.display().to_string(),
+            message: err.to_string(),
+        })?;
+        let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        expand_statements(program.statements, base_dir, visited, stack)
+    })();
+    stack.pop();
+
+    let statements = result?;
+    visited.insert(path);
+    Ok(statements)
+}
+
+fn resolve_import_path(base_dir: &Path, import: &str) -> PathBuf {
+    let mut path = PathBuf::from(base_dir);
+
+    for segment in import.split('.') {
+        path.push(segment);
+    }
+
+    path.set_extension("nex");
+    path
 }
 
 fn build_node(
@@ -570,10 +705,12 @@ pub fn eval_source(source: &str) -> Result<Env, EvalError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{eval, execute, ActionView, TraceEntry, TypedNodeValue};
-    use crate::nex::ast::Action;
-    use crate::nex::parse;
+    use super::{eval, execute, expand_program, ActionView, TraceEntry, TypedNodeValue};
+    use crate::nex::{parse, program_hash, Action, EvalError};
     use crate::quality::EvidenceStrength;
+    use std::fs;
+    use std::path::Path;
+    use tempfile::tempdir;
     use uuid::Uuid;
 
     #[test]
@@ -673,6 +810,86 @@ mod tests {
                 assert_eq!(action, Action::Deny);
                 assert_eq!(required, EvidenceStrength::Anchored);
                 assert_eq!(actual, EvidenceStrength::Signed);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn program_hash_is_stable_for_same_program() {
+        let program = parse("let sum = node 1 signed\n").expect("parse");
+        let hash_a = program_hash(&program);
+        let hash_b = program_hash(&program);
+
+        assert_eq!(hash_a, hash_b);
+    }
+
+    #[test]
+    fn program_hash_changes_when_source_changes() {
+        let program_a = parse("let sum = node 1 signed\n").expect("parse");
+        let program_b = parse("let sum = node 2 signed\n").expect("parse");
+
+        assert_ne!(program_hash(&program_a), program_hash(&program_b));
+    }
+
+    #[test]
+    fn import_resolves_examples_lib_risk() {
+        let examples_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+        let source = fs::read_to_string(examples_dir.join("check.nex")).expect("read check.nex");
+        let program = parse(&source).expect("parse");
+        let expanded = expand_program(program, &examples_dir).expect("expand imports");
+        let execution = execute(expanded).expect("eval");
+
+        assert_eq!(
+            execution.env.get("threshold"),
+            Some(&TypedNodeValue::I(700))
+        );
+        assert_eq!(
+            execution.env.get("user_score"),
+            Some(&TypedNodeValue::I(750))
+        );
+        assert!(matches!(
+            execution.entries.last(),
+            Some(TraceEntry::Action(ActionView { granted: true, .. }))
+        ));
+    }
+
+    #[test]
+    fn missing_import_fails_closed() {
+        let dir = tempdir().expect("tempdir");
+        let source = "use lib.risk\nlet sum = node 1 signed\n";
+        let program = parse(source).expect("parse");
+        let err = expand_program(program, dir.path()).expect_err("missing import");
+
+        match err {
+            EvalError::MissingImport { path } => {
+                let normalized = path.replace('\\', "/");
+                assert!(normalized.ends_with("lib/risk.nex"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn circular_import_fails_closed() {
+        let dir = tempdir().expect("tempdir");
+        let main_path = dir.path().join("main.nex");
+        let a_path = dir.path().join("a.nex");
+        let b_path = dir.path().join("b.nex");
+
+        fs::write(&main_path, "use a\nlet sum = node 1 signed\n").expect("write main");
+        fs::write(&a_path, "use b\nlet a = node 2 signed\n").expect("write a");
+        fs::write(&b_path, "use a\nlet b = node 3 signed\n").expect("write b");
+
+        let source = fs::read_to_string(&main_path).expect("read main");
+        let program = parse(&source).expect("parse");
+        let err = expand_program(program, dir.path()).expect_err("circular import");
+
+        match err {
+            EvalError::CircularImport { chain } => {
+                assert!(chain.len() >= 3);
+                assert!(chain.first().expect("chain start").ends_with("a.nex"));
+                assert!(chain.last().expect("chain end").ends_with("a.nex"));
             }
             other => panic!("unexpected error: {other:?}"),
         }

@@ -28,6 +28,9 @@ impl fmt::Display for Action {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Stmt {
+    Use {
+        path: String,
+    },
     Node {
         id: String,
         value: Expr,

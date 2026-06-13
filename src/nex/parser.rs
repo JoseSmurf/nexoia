@@ -231,6 +231,7 @@ fn parse_statement(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError>
     let keyword = word(first, line_no)?;
 
     match keyword.as_str() {
+        "use" => parse_use(tokens, line_no),
         "let" => parse_let(tokens, line_no),
         "attest" => parse_attest(tokens, line_no),
         "assert" => parse_assert(tokens, line_no),
@@ -241,6 +242,19 @@ fn parse_statement(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError>
             format!("unknown keyword '{other}'"),
         )),
     }
+}
+
+fn parse_use(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError> {
+    let path_token = tokens.get(1).ok_or_else(|| {
+        ParseError::new(
+            line_no,
+            tokens[0].column + 1,
+            "expected import path after 'use'",
+        )
+    })?;
+    let path = parse_import_path(path_token, line_no)?;
+    ensure_end(tokens, 2, line_no)?;
+    Ok(Stmt::Use { path })
 }
 
 fn parse_let(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError> {
@@ -471,6 +485,24 @@ fn parse_act(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError> {
     })
 }
 
+fn parse_import_path(token: &Token, line_no: usize) -> Result<String, ParseError> {
+    let path = word(token, line_no)?;
+    let valid = !path.is_empty()
+        && path.split('.').all(|segment| !segment.is_empty())
+        && !path.contains('/')
+        && !path.contains('\\');
+
+    if valid {
+        Ok(path)
+    } else {
+        Err(ParseError::new(
+            line_no,
+            token.column,
+            "invalid import path",
+        ))
+    }
+}
+
 fn parse_expr(token: &Token) -> Result<Expr, ParseError> {
     Ok(match &token.kind {
         TokenKind::Int(value) => Expr::IntLit(*value),
@@ -685,6 +717,15 @@ mod tests {
     fn parses_comment_construct() {
         let program = parse("  # comment only").expect("parse");
         assert!(program.statements.is_empty());
+    }
+
+    #[test]
+    fn parses_use_construct() {
+        let program = parse("use lib.risk").expect("parse");
+        assert!(matches!(
+            program.statements[0],
+            Stmt::Use { ref path } if path == "lib.risk"
+        ));
     }
 
     #[test]

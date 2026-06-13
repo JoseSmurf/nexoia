@@ -1,0 +1,2 @@
+# lib/risk.nex - shared risk threshold
+let threshold = node 700 signed

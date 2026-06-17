@@ -1,4 +1,5 @@
 mod decision;
+mod explain;
 mod evidence;
 mod hash;
 mod provenance;
@@ -45,6 +46,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let decisions_jsonl = write_jsonl_string(std::slice::from_ref(&decision))?;
     write_text("decisions.jsonl", &decisions_jsonl)?;
+
+    let report = explain::explain_chain(std::slice::from_ref(&decision));
+    let explain_json = serde_json::to_string_pretty(&report)?;
+    write_text("explain.json", &explain_json)?;
+    println!("{}", report.summary);
 
     let manifest = build_manifest(
         &state,

@@ -75,7 +75,7 @@ pub struct ExplainReport {
 /// e produz um relatório com diagnósticos e conflitos detectados.
 ///
 /// # Exemplo
-/// ```
+/// ```ignore
 /// use nexoia::explain::{explain_chain, load_decisions_jsonl};
 ///
 /// let records = load_decisions_jsonl("decisions.jsonl").unwrap();

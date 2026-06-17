@@ -1,6 +1,6 @@
 mod decision;
-mod explain;
 mod evidence;
+mod explain;
 mod hash;
 mod provenance;
 mod quality;

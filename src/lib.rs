@@ -1,3 +1,5 @@
+pub mod ai;
+pub mod defense;
 pub mod decision;
 pub mod evidence;
 pub mod explain;

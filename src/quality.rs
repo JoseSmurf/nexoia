@@ -48,14 +48,12 @@ pub fn evaluate(evidence_hash: &str, kind: &str) -> EvidenceStrength {
         return EvidenceStrength::Unverifiable;
     }
 
-    if kind.contains("anchored") || kind.contains("external") {
-        EvidenceStrength::Anchored
-    } else if kind.contains("signed") {
-        EvidenceStrength::Signed
-    } else if kind.contains("witness") {
-        EvidenceStrength::Witnessed
-    } else {
-        EvidenceStrength::Local
+    match kind.as_str() {
+        "anchored" | "external" => EvidenceStrength::Anchored,
+        "signed" => EvidenceStrength::Signed,
+        "witness" | "witnessed" => EvidenceStrength::Witnessed,
+        "local" => EvidenceStrength::Local,
+        _ => EvidenceStrength::Unverifiable,
     }
 }
 
@@ -112,7 +110,35 @@ mod tests {
         assert_eq!(evaluate("abcd", "signed"), EvidenceStrength::Signed);
         assert_eq!(evaluate("abcd", "witness"), EvidenceStrength::Witnessed);
         assert_eq!(evaluate("abcd", "anchored"), EvidenceStrength::Anchored);
+        assert_eq!(evaluate("abcd", "local"), EvidenceStrength::Local);
         assert_eq!(evaluate("", "signed"), EvidenceStrength::Unverifiable);
+    }
+
+    #[test]
+    fn evaluate_unknown_kind_returns_unverifiable() {
+        assert_eq!(evaluate("abcd", "unknown"), EvidenceStrength::Unverifiable);
+        assert_eq!(evaluate("abcd", "typo"), EvidenceStrength::Unverifiable);
+        assert_eq!(evaluate("abcd", ""), EvidenceStrength::Unverifiable);
+    }
+
+    #[test]
+    fn evaluate_negated_strings_return_unverifiable() {
+        assert_eq!(
+            evaluate("abcd", "non_anchored"),
+            EvidenceStrength::Unverifiable
+        );
+        assert_eq!(
+            evaluate("abcd", "not_signed"),
+            EvidenceStrength::Unverifiable
+        );
+        assert_eq!(
+            evaluate("abcd", "unsigned"),
+            EvidenceStrength::Unverifiable
+        );
+        assert_eq!(
+            evaluate("abcd", "unwitnessed"),
+            EvidenceStrength::Unverifiable
+        );
     }
 
     #[test]
@@ -120,6 +146,23 @@ mod tests {
         let report = resolve_quality_divergence(EvidenceStrength::Signed, EvidenceStrength::Local);
         assert_eq!(report.chosen_side, "left");
         assert_eq!(report.reason_code, "LEFT_STRONGER");
+        assert!(!report.resolution_hash.is_empty());
+    }
+
+    #[test]
+    fn resolve_right_wins() {
+        let report = resolve_quality_divergence(EvidenceStrength::Local, EvidenceStrength::Signed);
+        assert_eq!(report.chosen_side, "right");
+        assert_eq!(report.reason_code, "RIGHT_STRONGER");
+        assert!(!report.resolution_hash.is_empty());
+    }
+
+    #[test]
+    fn resolve_tie() {
+        let report =
+            resolve_quality_divergence(EvidenceStrength::Witnessed, EvidenceStrength::Witnessed);
+        assert_eq!(report.chosen_side, "tie");
+        assert_eq!(report.reason_code, "EQUAL_STRENGTH");
         assert!(!report.resolution_hash.is_empty());
     }
 }

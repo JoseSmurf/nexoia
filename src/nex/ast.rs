@@ -1,4 +1,4 @@
-use crate::quality::EvidenceStrength;
+use crate::types::EvidenceStrength;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

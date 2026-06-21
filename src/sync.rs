@@ -1,5 +1,6 @@
 use crate::decision::DecisionRecord;
-use crate::quality::{resolve_quality_divergence, EvidenceStrength, ResolutionReport};
+use crate::quality::{resolve_quality_divergence, ResolutionReport};
+use crate::types::EvidenceStrength;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -31,7 +32,8 @@ impl SyncContract {
 mod tests {
     use super::SyncContract;
     use crate::decision::{DecisionBody, DecisionRecord, DecisionStatus};
-    use crate::quality::{resolve_quality_divergence, EvidenceStrength};
+    use crate::quality::resolve_quality_divergence;
+    use crate::types::EvidenceStrength;
     use chrono::Utc;
     use uuid::Uuid;
 

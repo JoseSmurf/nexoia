@@ -12,6 +12,8 @@ mod provenance;
 mod quality;
 #[path = "../state.rs"]
 mod state;
+#[path = "../types.rs"]
+mod types;
 #[path = "../provenance/verify.rs"]
 mod verify_core;
 

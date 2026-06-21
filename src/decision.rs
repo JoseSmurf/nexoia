@@ -1,6 +1,7 @@
 use crate::hash::canonical_hash;
-use crate::quality::{evaluate as quality_evaluate, EvidenceStrength, ResolutionReport};
+use crate::quality::{evaluate as quality_evaluate, ResolutionReport};
 use crate::state::{Scenario, State};
+use crate::types::EvidenceStrength;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -184,11 +185,11 @@ mod tests {
         assert_eq!(decision.body.status, DecisionStatus::Ok);
         assert_eq!(
             decision.body.quality_left_strength,
-            crate::quality::EvidenceStrength::Signed
+            crate::types::EvidenceStrength::Signed
         );
         assert_eq!(
             decision.body.quality_right_strength,
-            crate::quality::EvidenceStrength::Local
+            crate::types::EvidenceStrength::Local
         );
         assert!(!decision.body.quality_report.resolution_hash.is_empty());
     }
@@ -200,11 +201,11 @@ mod tests {
             evaluate(&state, "state_hash".to_string(), "witness", "anchored").expect("decision");
         assert_eq!(
             decision.body.quality_left_strength,
-            crate::quality::EvidenceStrength::Witnessed
+            crate::types::EvidenceStrength::Witnessed
         );
         assert_eq!(
             decision.body.quality_right_strength,
-            crate::quality::EvidenceStrength::Anchored
+            crate::types::EvidenceStrength::Anchored
         );
         assert_eq!(decision.body.quality_report.chosen_side, "right");
         assert_eq!(decision.body.quality_report.reason_code, "RIGHT_STRONGER");
@@ -219,11 +220,11 @@ mod tests {
         assert_eq!(decision.body.quality_report.reason_code, "EQUAL_STRENGTH");
         assert_eq!(
             decision.body.quality_left_strength,
-            crate::quality::EvidenceStrength::Signed
+            crate::types::EvidenceStrength::Signed
         );
         assert_eq!(
             decision.body.quality_right_strength,
-            crate::quality::EvidenceStrength::Signed
+            crate::types::EvidenceStrength::Signed
         );
     }
 }

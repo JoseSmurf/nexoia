@@ -8,6 +8,8 @@ mod nex;
 mod provenance;
 #[path = "../quality.rs"]
 mod quality;
+#[path = "../types.rs"]
+mod types;
 
 use serde::Serialize;
 use std::error::Error;

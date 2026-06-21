@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::quality::EvidenceStrength;
+use crate::types::EvidenceStrength;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use uuid::Uuid;
@@ -112,17 +112,17 @@ mod tests {
 
         assert_eq!(
             unverifiable.strength(),
-            crate::quality::EvidenceStrength::Unverifiable
+            crate::types::EvidenceStrength::Unverifiable
         );
-        assert_eq!(local.strength(), crate::quality::EvidenceStrength::Local);
+        assert_eq!(local.strength(), crate::types::EvidenceStrength::Local);
         assert_eq!(
             witnessed.strength(),
-            crate::quality::EvidenceStrength::Witnessed
+            crate::types::EvidenceStrength::Witnessed
         );
-        assert_eq!(signed.strength(), crate::quality::EvidenceStrength::Signed);
+        assert_eq!(signed.strength(), crate::types::EvidenceStrength::Signed);
         assert_eq!(
             anchored.strength(),
-            crate::quality::EvidenceStrength::Anchored
+            crate::types::EvidenceStrength::Anchored
         );
     }
 

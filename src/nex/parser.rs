@@ -1,4 +1,4 @@
-use crate::quality::EvidenceStrength;
+use crate::types::EvidenceStrength;
 use std::error::Error;
 use std::fmt;
 
@@ -687,7 +687,7 @@ fn ensure_end(tokens: &[Token], idx: usize, line_no: usize) -> Result<(), ParseE
 mod tests {
     use super::{parse, ParseError};
     use crate::nex::ast::{Action, Expr, Stmt, Type};
-    use crate::quality::EvidenceStrength;
+    use crate::types::EvidenceStrength;
 
     #[test]
     fn parses_node_construct() {

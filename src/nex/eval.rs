@@ -4,7 +4,7 @@ use crate::provenance::{
     Anchored, InsufficientWitnessesError, Local, Signed, TypedNode, Unverifiable, Witness,
     WitnessKind, WitnessSet, Witnessed,
 };
-use crate::quality::EvidenceStrength;
+use crate::types::EvidenceStrength;
 use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -705,7 +705,7 @@ pub fn eval_source(source: &str) -> Result<Env, EvalError> {
 mod tests {
     use super::{eval, execute, expand_program, ActionView, TraceEntry, TypedNodeValue};
     use crate::nex::{parse, program_hash, Action, EvalError};
-    use crate::quality::EvidenceStrength;
+    use crate::types::EvidenceStrength;
     use std::fs;
     use std::path::Path;
     use tempfile::tempdir;

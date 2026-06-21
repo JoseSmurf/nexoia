@@ -4,7 +4,7 @@ use crate::decision::DecisionStatus;
 use crate::evidence::{EvidenceKind, EvidenceRecord};
 use crate::hash::canonical_hash;
 use crate::provenance::aggregator::{walk_provenance_chain, ProvenanceNode};
-use crate::quality::EvidenceStrength;
+use crate::types::EvidenceStrength;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -381,7 +381,8 @@ mod tests {
     use super::run;
     use crate::decision::{DecisionBody, DecisionRecord, DecisionStatus};
     use crate::evidence::{EvidenceBody, EvidenceKind, EvidenceRecord};
-    use crate::quality::{resolve_quality_divergence, EvidenceStrength};
+    use crate::quality::resolve_quality_divergence;
+    use crate::types::EvidenceStrength;
     use chrono::{DateTime, Utc};
     use serde_json::Value;
     use std::fs;

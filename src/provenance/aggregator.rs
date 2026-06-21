@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::quality::EvidenceStrength;
+use crate::types::EvidenceStrength;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -65,7 +65,7 @@ pub fn walk_provenance_chain(start: ProvenanceNode, parents: &[ProvenanceNode]) 
 #[cfg(test)]
 mod tests {
     use super::{aggregate_chain_strength, walk_provenance_chain, ProvenanceNode};
-    use crate::quality::EvidenceStrength;
+    use crate::types::EvidenceStrength;
 
     fn node(
         node_id: &str,

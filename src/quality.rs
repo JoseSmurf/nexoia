@@ -1,34 +1,6 @@
 use crate::hash::canonical_hash;
+use crate::types::EvidenceStrength;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum EvidenceStrength {
-    Unverifiable, // Level 0 - no material proof
-    Local,        // Level 1 - local evidence
-    Witnessed,    // Level 2 - witnessed
-    Signed,       // Level 3 - signed
-    Anchored,     // Level 4 - externally anchored
-}
-
-impl EvidenceStrength {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Unverifiable => "UNVERIFIABLE",
-            Self::Local => "LOCAL",
-            Self::Witnessed => "WITNESSED",
-            Self::Signed => "SIGNED",
-            Self::Anchored => "ANCHORED",
-        }
-    }
-}
-
-impl fmt::Display for EvidenceStrength {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolutionReport {
@@ -103,7 +75,8 @@ pub fn resolve_quality_divergence(
 
 #[cfg(test)]
 mod tests {
-    use super::{evaluate, resolve_quality_divergence, EvidenceStrength};
+    use super::{evaluate, resolve_quality_divergence};
+    use crate::types::EvidenceStrength;
 
     #[test]
     fn evaluate_maps_known_kinds() {

@@ -8,7 +8,7 @@
 //!   pub mod explain;
 
 use crate::decision::{DecisionRecord, DecisionStatus};
-use crate::quality::EvidenceStrength;
+use crate::types::EvidenceStrength;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -320,7 +320,8 @@ pub fn load_decisions_jsonl(path: &str) -> Result<Vec<DecisionRecord>, Box<dyn s
 mod tests {
     use super::*;
     use crate::decision::{DecisionBody, DecisionRecord, DecisionStatus};
-    use crate::quality::{EvidenceStrength, ResolutionReport};
+    use crate::quality::ResolutionReport;
+    use crate::types::EvidenceStrength;
     use chrono::Utc;
     use uuid::Uuid;
 

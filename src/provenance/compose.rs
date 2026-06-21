@@ -104,7 +104,7 @@ mod tests {
     use super::derive;
     use crate::provenance::typed_node::Marker;
     use crate::provenance::{Anchored, Local, Signed, TypedNode, Unverifiable, Witnessed};
-    use crate::quality::EvidenceStrength;
+    use crate::types::EvidenceStrength;
     use uuid::Uuid;
 
     fn node_id(seed: &str) -> Uuid {

@@ -5,28 +5,13 @@ use std::io::Read;
 use std::sync::Arc;
 
 use crate::defense::ValidationError;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EvidenceStrength {
-    Unverifiable,
-    Anchored,
-}
-
-impl fmt::Display for EvidenceStrength {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EvidenceStrength::Unverifiable => write!(f, "Unverifiable"),
-            EvidenceStrength::Anchored => write!(f, "Anchored"),
-        }
-    }
-}
+use crate::types::{EvidenceProvider, EvidenceStrength, NexAssertion};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AIError {
     ModelEmpty,
     ModelExceedsLimit { limit: usize, actual: usize },
     InferenceFailed(String),
-    BelowConfidenceThreshold { score: f32, threshold: f32 },
     InputValidationError(ValidationError),
     IoError(String),
     ModelIntegrityViolation { expected: String, actual: String },
@@ -44,13 +29,6 @@ impl fmt::Display for AIError {
                 )
             }
             AIError::InferenceFailed(s) => write!(f, "falha interna na inferência: {}", s),
-            AIError::BelowConfidenceThreshold { score, threshold } => {
-                write!(
-                    f,
-                    "confiança da IA insuficiente: {} (mínimo: {})",
-                    score, threshold
-                )
-            }
             AIError::InputValidationError(e) => {
                 write!(f, "dado bruto rejeitado pela defesa: {}", e)
             }
@@ -67,17 +45,6 @@ impl fmt::Display for AIError {
 }
 
 impl std::error::Error for AIError {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NexAssertion {
-    pub context_id: String,
-    pub evidence_strength: EvidenceStrength,
-}
-
-pub trait AIContextTranslator {
-    fn translate_to_nex(&self, raw_data: &str, max_bytes: usize) -> Result<NexAssertion, AIError>;
-    fn model_fingerprint(&self) -> &str;
-}
 
 pub struct LocalAIEngine {
     model_path: String,
@@ -132,27 +99,29 @@ impl LocalAIEngine {
     }
 }
 
-impl AIContextTranslator for LocalAIEngine {
-    fn translate_to_nex(&self, raw_data: &str, max_bytes: usize) -> Result<NexAssertion, AIError> {
-        if let Err(e) = crate::defense::validate_raw_input(raw_data, max_bytes) {
+impl EvidenceProvider for LocalAIEngine {
+    type Error = AIError;
+
+    fn translate(&self, raw: &str, max_bytes: usize) -> Result<NexAssertion, AIError> {
+        if let Err(e) = crate::defense::validate_raw_input(raw, max_bytes) {
             return Err(AIError::InputValidationError(e));
         }
 
         let mock_score = 0.95f32;
-        if mock_score < self.confidence_threshold {
-            return Err(AIError::BelowConfidenceThreshold {
-                score: mock_score,
-                threshold: self.confidence_threshold,
-            });
-        }
+        let strength = if mock_score < self.confidence_threshold {
+            EvidenceStrength::Unverifiable
+        } else {
+            EvidenceStrength::Anchored
+        };
 
         Ok(NexAssertion {
             context_id: String::from("ctx_01"),
-            evidence_strength: EvidenceStrength::Anchored,
+            evidence_strength: strength,
+            confidence: mock_score,
         })
     }
 
-    fn model_fingerprint(&self) -> &str {
+    fn fingerprint(&self) -> &str {
         &self.model_hash
     }
 }

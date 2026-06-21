@@ -53,6 +53,62 @@ pub struct LocalAIEngine {
     model_bytes: Arc<Vec<u8>>,
 }
 
+pub struct MockEngine {
+    confidence_threshold: f32,
+}
+
+impl MockEngine {
+    pub fn new(threshold: f32) -> Self {
+        Self {
+            confidence_threshold: threshold.clamp(0.0, 1.0),
+        }
+    }
+}
+
+impl EvidenceProvider for MockEngine {
+    type Error = AIError;
+
+    fn translate(&self, raw: &str, max_bytes: usize) -> Result<NexAssertion, AIError> {
+        if let Err(e) = crate::defense::validate_raw_input(raw, max_bytes) {
+            return Err(AIError::InputValidationError(e));
+        }
+
+        let score = if raw.contains("anchored") || raw.contains("external") {
+            0.95f32
+        } else if raw.contains("signed") {
+            0.80f32
+        } else if raw.contains("witness") {
+            0.65f32
+        } else if raw.contains("local") {
+            0.50f32
+        } else {
+            0.30f32
+        };
+
+        let strength = if score < self.confidence_threshold {
+            EvidenceStrength::Unverifiable
+        } else if score >= 0.90 {
+            EvidenceStrength::Anchored
+        } else if score >= 0.75 {
+            EvidenceStrength::Signed
+        } else if score >= 0.60 {
+            EvidenceStrength::Witnessed
+        } else {
+            EvidenceStrength::Local
+        };
+
+        Ok(NexAssertion {
+            context_id: format!("ctx_{}", &raw[..8.min(raw.len())]),
+            evidence_strength: strength,
+            confidence: score,
+        })
+    }
+
+    fn fingerprint(&self) -> &str {
+        "mock_engine_v1"
+    }
+}
+
 impl LocalAIEngine {
     pub fn new(
         model_path: &str,
@@ -107,17 +163,34 @@ impl EvidenceProvider for LocalAIEngine {
             return Err(AIError::InputValidationError(e));
         }
 
-        let mock_score = 0.95f32;
-        let strength = if mock_score < self.confidence_threshold {
-            EvidenceStrength::Unverifiable
+        let score = if raw.contains("anchored") || raw.contains("external") {
+            0.95f32
+        } else if raw.contains("signed") {
+            0.80f32
+        } else if raw.contains("witness") {
+            0.65f32
+        } else if raw.contains("local") {
+            0.50f32
         } else {
+            0.30f32
+        };
+
+        let strength = if score < self.confidence_threshold {
+            EvidenceStrength::Unverifiable
+        } else if score >= 0.90 {
             EvidenceStrength::Anchored
+        } else if score >= 0.75 {
+            EvidenceStrength::Signed
+        } else if score >= 0.60 {
+            EvidenceStrength::Witnessed
+        } else {
+            EvidenceStrength::Local
         };
 
         Ok(NexAssertion {
-            context_id: String::from("ctx_01"),
+            context_id: format!("ctx_{}", &raw[..8.min(raw.len())]),
             evidence_strength: strength,
-            confidence: mock_score,
+            confidence: score,
         })
     }
 

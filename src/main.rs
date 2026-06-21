@@ -1,3 +1,4 @@
+mod ai;
 mod decision;
 mod defense;
 mod evidence;
@@ -12,6 +13,7 @@ mod types;
 use crate::decision::{DecisionRecord, DecisionStatus};
 use crate::hash::canonical_hash;
 use crate::state::State;
+use crate::types::EvidenceProvider;
 use serde::Serialize;
 use std::error::Error;
 use std::path::Path;
@@ -37,6 +39,7 @@ struct Manifest {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let limiter = defense::RateLimiter::new(100, Duration::from_secs(60));
+    let engine = ai::MockEngine::new(0.70);
 
     let state = State::from_env()?;
     let state_json = serde_json::to_string_pretty(&state)?;
@@ -47,10 +50,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("rate limit exceeded for subject".into());
     }
 
+    let assertion = engine.translate(&state_json, 1_048_576)?;
+    let kind = match assertion.evidence_strength {
+        types::EvidenceStrength::Anchored => "anchored",
+        types::EvidenceStrength::Signed => "signed",
+        types::EvidenceStrength::Witnessed => "witness",
+        types::EvidenceStrength::Local => "local",
+        types::EvidenceStrength::Unverifiable => "local",
+    };
+
     write_text("state.json", &state_json)?;
     let state_hash = canonical_hash(&state_json);
 
-    let decision = decision::evaluate(&state, state_hash.clone(), "signed", "local")?;
+    let decision = decision::evaluate(&state, state_hash.clone(), kind, "local")?;
     let evidence_records = evidence::build_records(&state, &decision)?;
 
     let evidence_jsonl = write_jsonl_string(&evidence_records)?;

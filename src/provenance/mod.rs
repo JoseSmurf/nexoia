@@ -1,6 +1,5 @@
 pub mod aggregator;
 pub mod compose;
-pub mod signing;
 pub mod typed_node;
 pub mod witness;
 

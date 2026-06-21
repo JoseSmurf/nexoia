@@ -131,10 +131,7 @@ mod tests {
             evaluate("abcd", "not_signed"),
             EvidenceStrength::Unverifiable
         );
-        assert_eq!(
-            evaluate("abcd", "unsigned"),
-            EvidenceStrength::Unverifiable
-        );
+        assert_eq!(evaluate("abcd", "unsigned"), EvidenceStrength::Unverifiable);
         assert_eq!(
             evaluate("abcd", "unwitnessed"),
             EvidenceStrength::Unverifiable

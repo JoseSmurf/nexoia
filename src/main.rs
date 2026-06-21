@@ -1,4 +1,5 @@
 mod decision;
+mod defense;
 mod evidence;
 mod explain;
 mod hash;
@@ -14,6 +15,7 @@ use crate::state::State;
 use serde::Serialize;
 use std::error::Error;
 use std::path::Path;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize)]
 struct ArtifactSummary {
@@ -34,8 +36,17 @@ struct Manifest {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let limiter = defense::RateLimiter::new(100, Duration::from_secs(60));
+
     let state = State::from_env()?;
     let state_json = serde_json::to_string_pretty(&state)?;
+
+    defense::validate_raw_input(&state_json, 1_048_576)?;
+
+    if !limiter.check(&state.subject) {
+        return Err("rate limit exceeded for subject".into());
+    }
+
     write_text("state.json", &state_json)?;
     let state_hash = canonical_hash(&state_json);
 

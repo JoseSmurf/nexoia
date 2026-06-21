@@ -1,6 +1,6 @@
 pub mod ai;
-pub mod defense;
 pub mod decision;
+pub mod defense;
 pub mod evidence;
 pub mod explain;
 pub mod hash;

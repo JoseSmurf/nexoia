@@ -37,13 +37,23 @@ impl fmt::Display for AIError {
         match self {
             AIError::ModelEmpty => write!(f, "erro: arquivo do modelo de IA está vazio"),
             AIError::ModelExceedsLimit { limit, actual } => {
-                write!(f, "modelo excede teto de segurança: {} bytes (máximo: {})", actual, limit)
+                write!(
+                    f,
+                    "modelo excede teto de segurança: {} bytes (máximo: {})",
+                    actual, limit
+                )
             }
             AIError::InferenceFailed(s) => write!(f, "falha interna na inferência: {}", s),
             AIError::BelowConfidenceThreshold { score, threshold } => {
-                write!(f, "confiança da IA insuficiente: {} (mínimo: {})", score, threshold)
+                write!(
+                    f,
+                    "confiança da IA insuficiente: {} (mínimo: {})",
+                    score, threshold
+                )
             }
-            AIError::InputValidationError(e) => write!(f, "dado bruto rejeitado pela defesa: {}", e),
+            AIError::InputValidationError(e) => {
+                write!(f, "dado bruto rejeitado pela defesa: {}", e)
+            }
             AIError::IoError(s) => write!(f, "falha de I/O ao ler arquivo do modelo: {}", s),
             AIError::ModelIntegrityViolation { expected, actual } => {
                 write!(
@@ -123,11 +133,7 @@ impl LocalAIEngine {
 }
 
 impl AIContextTranslator for LocalAIEngine {
-    fn translate_to_nex(
-        &self,
-        raw_data: &str,
-        max_bytes: usize,
-    ) -> Result<NexAssertion, AIError> {
+    fn translate_to_nex(&self, raw_data: &str, max_bytes: usize) -> Result<NexAssertion, AIError> {
         if let Err(e) = crate::defense::validate_raw_input(raw_data, max_bytes) {
             return Err(AIError::InputValidationError(e));
         }

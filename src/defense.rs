@@ -121,9 +121,7 @@ impl AtomicStats {
             accepted: self.accepted.load(Ordering::Relaxed),
             rejected_rate_limit: self.rejected_rate_limit.load(Ordering::Relaxed),
             rejected_sources_limit: self.rejected_sources_limit.load(Ordering::Relaxed),
-            rejected_source_key_too_long: self
-                .rejected_source_key_too_long
-                .load(Ordering::Relaxed),
+            rejected_source_key_too_long: self.rejected_source_key_too_long.load(Ordering::Relaxed),
             cleanup_runs: self.cleanup_runs.load(Ordering::Relaxed),
             sources_removed: self.sources_removed.load(Ordering::Relaxed),
         }
@@ -186,8 +184,11 @@ pub struct RateLimiter {
 
 impl RateLimiter {
     pub fn new(max_requests: usize, window: Duration) -> Self {
-        let shards: [Mutex<Shard>; NUM_SHARDS] =
-            std::array::from_fn(|_| Mutex::new(Shard { history: HashMap::new() }));
+        let shards: [Mutex<Shard>; NUM_SHARDS] = std::array::from_fn(|_| {
+            Mutex::new(Shard {
+                history: HashMap::new(),
+            })
+        });
         let shards = Arc::new(shards);
 
         let stats = Arc::new(AtomicStats::new());
@@ -222,8 +223,7 @@ impl RateLimiter {
                         }
 
                         if total_removed > 0 {
-                            active_sources_clone
-                                .fetch_sub(total_removed, Ordering::Relaxed);
+                            active_sources_clone.fetch_sub(total_removed, Ordering::Relaxed);
                             stats_clone
                                 .sources_removed
                                 .fetch_add(total_removed as u64, Ordering::Relaxed);
@@ -299,17 +299,15 @@ impl RateLimiter {
             return true;
         }
 
-        let reserved = self.active_sources.fetch_update(
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-            |current| {
-                if current < self.max_sources {
-                    Some(current + 1)
-                } else {
-                    None
-                }
-            },
-        );
+        let reserved =
+            self.active_sources
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    if current < self.max_sources {
+                        Some(current + 1)
+                    } else {
+                        None
+                    }
+                });
 
         if reserved.is_err() {
             self.stats
@@ -325,9 +323,7 @@ impl RateLimiter {
 
         let mut timestamps = VecDeque::with_capacity(self.max_requests.min(16));
         timestamps.push_back(now);
-        shard
-            .history
-            .insert(source_key.to_string(), timestamps);
+        shard.history.insert(source_key.to_string(), timestamps);
         reservation.commit();
 
         self.stats.accepted.fetch_add(1, Ordering::Relaxed);
@@ -349,8 +345,8 @@ impl RateLimiter {
         match shard.history.get(source_key) {
             Some(timestamps) => {
                 let now = Instant::now();
-                let expired_count = timestamps
-                    .partition_point(|&t| now.duration_since(t) >= self.window);
+                let expired_count =
+                    timestamps.partition_point(|&t| now.duration_since(t) >= self.window);
                 let active = timestamps.len() - expired_count;
                 self.max_requests.saturating_sub(active)
             }

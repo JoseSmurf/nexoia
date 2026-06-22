@@ -16,6 +16,7 @@ use crate::network::api::{self, ApiState};
 use crate::network::epa::SharedEPA;
 use crate::network::identity::NodeIdentity;
 use crate::network::persistence::{self, PersistedData};
+use crate::network::reputation::ReputationStore;
 use crate::network::transport::{
     NetworkMessage, PeerList, TrustedPeer, TrustedPeerList, UdpTransport,
 };
@@ -112,8 +113,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         known_peers,
         config.max_peers,
     )));
-    // Contador de falhas por node_id (base para reputação futura)
-    let failure_counts: Arc<RwLock<HashMap<String, u32>>> = Arc::new(RwLock::new(HashMap::new()));
+    // Sistema de reputação persistente
+    let reputation_path = config.data_dir.join("reputation.json");
+    let mut reputation_store = ReputationStore::with_path(reputation_path);
+    reputation_store.load().unwrap_or_else(|e| {
+        eprintln!("Warning: Could not load reputation: {}", e);
+    });
+    let reputation: Arc<RwLock<ReputationStore>> = Arc::new(RwLock::new(reputation_store));
     // Lista de peers autenticados via handshake
     let trusted_peers: Arc<RwLock<TrustedPeerList>> =
         Arc::new(RwLock::new(TrustedPeerList::new(config.max_peers)));
@@ -132,7 +138,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let epas_clone = Arc::clone(&epas);
     let peers_clone = Arc::clone(&peers);
     let trusted_clone = Arc::clone(&trusted_peers);
-    let failures_clone = Arc::clone(&failure_counts);
+    let reputation_clone = Arc::clone(&reputation);
     let data_path_clone = data_path.clone();
 
     tokio::spawn(async move {
@@ -142,7 +148,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             epas_clone,
             peers_clone,
             trusted_clone,
-            failures_clone,
+            reputation_clone,
             data_path_clone,
         )
         .await;
@@ -285,7 +291,7 @@ async fn run_udp_listener(
     epas: Arc<RwLock<Vec<SharedEPA>>>,
     peers: Arc<RwLock<PeerList>>,
     trusted_peers: Arc<RwLock<TrustedPeerList>>,
-    failure_counts: Arc<RwLock<HashMap<String, u32>>>,
+    reputation: Arc<RwLock<ReputationStore>>,
     data_path: PathBuf,
 ) {
     loop {
@@ -415,7 +421,7 @@ async fn run_udp_listener(
                     // Verificação assíncrona em background
                     let epas_clone = Arc::clone(&epas);
                     let peers_clone = Arc::clone(&peers);
-                    let failures_clone = Arc::clone(&failure_counts);
+                    let reputation_clone = Arc::clone(&reputation);
                     let data_path_clone = data_path.clone();
 
                     tokio::spawn(async move {
@@ -423,7 +429,7 @@ async fn run_udp_listener(
                             epa,
                             epas_clone,
                             peers_clone,
-                            failures_clone,
+                            reputation_clone,
                             data_path_clone,
                         )
                         .await;
@@ -442,13 +448,20 @@ async fn verify_and_store_epa(
     epa: SharedEPA,
     epas: Arc<RwLock<Vec<SharedEPA>>>,
     peers: Arc<RwLock<PeerList>>,
-    failure_counts: Arc<RwLock<HashMap<String, u32>>>,
+    reputation: Arc<RwLock<ReputationStore>>,
     data_path: PathBuf,
 ) {
     let result = verify_epa(&epa);
 
     match result {
         VerifyResult::Valid => {
+            // Registra sucesso na reputação
+            {
+                let mut rep = reputation.write().await;
+                rep.record_success(&epa.node_id);
+                rep.save()
+                    .unwrap_or_else(|e| eprintln!("Failed to save reputation: {}", e));
+            }
             let mut epa_list = epas.write().await;
             epa_list.push(epa.clone());
             println!("✓ Received valid EPA: {}", epa);
@@ -456,35 +469,40 @@ async fn verify_and_store_epa(
         }
         VerifyResult::InvalidIntegrity => {
             eprintln!("✗ EPA integrity failed from {}", epa.node_id);
-            increment_failure(&failure_counts, &epa.node_id).await;
+            increment_failure(&reputation, &epa.node_id).await;
         }
         VerifyResult::InvalidSignature => {
             eprintln!("✗ EPA signature failed from {}", epa.node_id);
-            increment_failure(&failure_counts, &epa.node_id).await;
+            increment_failure(&reputation, &epa.node_id).await;
         }
         VerifyResult::TimestampExpired => {
             eprintln!("✗ EPA timestamp expired from {}", epa.node_id);
-            increment_failure(&failure_counts, &epa.node_id).await;
+            increment_failure(&reputation, &epa.node_id).await;
         }
         VerifyResult::MissingData => {
             eprintln!("✗ EPA missing data from {}", epa.node_id);
-            increment_failure(&failure_counts, &epa.node_id).await;
+            increment_failure(&reputation, &epa.node_id).await;
         }
     }
 }
 
-/// Incrementa contador de falhas de um nó.
-async fn increment_failure(failure_counts: &Arc<RwLock<HashMap<String, u32>>>, node_id: &str) {
-    let mut counts = failure_counts.write().await;
-    let count = counts.entry(node_id.to_string()).or_insert(0);
-    *count += 1;
+/// Incrementa contador de falhas de um nó via reputação.
+async fn increment_failure(reputation: &Arc<RwLock<ReputationStore>>, node_id: &str) {
+    let mut rep = reputation.write().await;
+    rep.record_failure(node_id);
 
-    if *count >= 10 {
+    let node_rep = rep.get_or_create(node_id);
+    if node_rep.is_banned() {
         eprintln!(
-            "⚠ Node {} has {} failures — consider banning",
-            node_id, count
+            "🚫 Node {} is now BANNED ({} failures)",
+            node_id, node_rep.failures
         );
+    } else {
+        eprintln!("⚠ Node {} has {} failures", node_id, node_rep.failures);
     }
+
+    rep.save()
+        .unwrap_or_else(|e| eprintln!("Failed to save reputation: {}", e));
 }
 
 async fn run_discovery(

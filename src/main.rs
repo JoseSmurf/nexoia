@@ -18,7 +18,7 @@ use crate::network::identity::NodeIdentity;
 use crate::network::persistence::{self, PersistedData};
 use crate::network::reputation::ReputationStore;
 use crate::network::transport::{
-    NetworkMessage, PeerList, TrustedPeer, TrustedPeerList, UdpTransport,
+    NetworkMessage, PeerList, PeerState, TrustedPeer, TrustedPeerList, UdpTransport,
 };
 use crate::network::verify::{verify_epa, VerifyResult};
 use crate::state::State;
@@ -127,6 +127,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Lista de peers autenticados via handshake
     let trusted_peers: Arc<RwLock<TrustedPeerList>> =
         Arc::new(RwLock::new(TrustedPeerList::new(config.max_peers)));
+    // Estado dos peers para heartbeat
+    let peer_states: Arc<RwLock<HashMap<SocketAddr, PeerState>>> =
+        Arc::new(RwLock::new(HashMap::new()));
 
     let api_state = ApiState {
         node_id: node.node_id.clone(),
@@ -141,11 +144,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("⚠ Encryption DISABLED (NEXOIA_DISABLE_ENCRYPTION=1)");
     }
 
+    // Spawn heartbeat sender
+    let node_heartbeat = node.clone();
+    let trusted_heartbeat = Arc::clone(&trusted_peers);
+    let peer_states_heartbeat = Arc::clone(&peer_states);
+    let udp_addr_clone = udp_addr;
+    tokio::spawn(async move {
+        run_heartbeat_sender(
+            node_heartbeat,
+            trusted_heartbeat,
+            peer_states_heartbeat,
+            udp_addr_clone,
+        )
+        .await;
+    });
+
+    // Spawn heartbeat monitor (remove inactive peers)
+    let peer_states_monitor = Arc::clone(&peer_states);
+    let trusted_monitor = Arc::clone(&trusted_peers);
+    tokio::spawn(async move {
+        run_heartbeat_monitor(peer_states_monitor, trusted_monitor).await;
+    });
+
     let node_clone = node.clone();
     let epas_clone = Arc::clone(&epas);
     let peers_clone = Arc::clone(&peers);
     let trusted_clone = Arc::clone(&trusted_peers);
     let reputation_clone = Arc::clone(&reputation);
+    let peer_states_clone = Arc::clone(&peer_states);
     let data_path_clone = data_path.clone();
     let disable_encryption = config.disable_encryption;
 
@@ -157,6 +183,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             peers_clone,
             trusted_clone,
             reputation_clone,
+            peer_states_clone,
             data_path_clone,
             disable_encryption,
         )
@@ -301,6 +328,7 @@ async fn run_udp_listener(
     peers: Arc<RwLock<PeerList>>,
     trusted_peers: Arc<RwLock<TrustedPeerList>>,
     reputation: Arc<RwLock<ReputationStore>>,
+    peer_states: Arc<RwLock<HashMap<SocketAddr, PeerState>>>,
     data_path: PathBuf,
     disable_encryption: bool,
 ) {
@@ -422,6 +450,37 @@ async fn run_udp_listener(
                     println!("Pong from {}", node_id);
                 }
 
+                // Heartbeat: Peer está vivo
+                NetworkMessage::Heartbeat { node_id, timestamp } => {
+                    // Atualiza estado do peer
+                    let mut states: tokio::sync::RwLockWriteGuard<
+                        '_,
+                        HashMap<SocketAddr, PeerState>,
+                    > = peer_states.write().await;
+                    if let Some(state) = states.get_mut(&addr) {
+                        state.record_heartbeat();
+                    } else {
+                        states.insert(addr, PeerState::new());
+                    }
+
+                    // Envia ack
+                    let ack = NetworkMessage::HeartbeatAck {
+                        node_id: node.node_id.clone(),
+                    };
+                    let _ = transport.send(&ack, addr).await;
+                }
+
+                // Heartbeat Ack: Peer confirmou que está vivo
+                NetworkMessage::HeartbeatAck { node_id } => {
+                    let mut states: tokio::sync::RwLockWriteGuard<
+                        '_,
+                        HashMap<SocketAddr, PeerState>,
+                    > = peer_states.write().await;
+                    if let Some(state) = states.get_mut(&addr) {
+                        state.record_heartbeat();
+                    }
+                }
+
                 // EPA: Só aceita de peers autenticados
                 NetworkMessage::EPA(mut epa) => {
                     let trusted = trusted_peers.read().await;
@@ -539,6 +598,106 @@ async fn increment_failure(reputation: &Arc<RwLock<ReputationStore>>, node_id: &
 
     rep.save()
         .unwrap_or_else(|e| eprintln!("Failed to save reputation: {}", e));
+}
+
+/// Envia heartbeat periodicamente para todos os peers confiáveis.
+async fn run_heartbeat_sender(
+    node: NodeIdentity,
+    trusted_peers: Arc<RwLock<TrustedPeerList>>,
+    peer_states: Arc<RwLock<HashMap<SocketAddr, PeerState>>>,
+    udp_addr: SocketAddr,
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
+
+    loop {
+        interval.tick().await;
+
+        let peers = trusted_peers.read().await;
+        let addrs: Vec<SocketAddr> = peers.addrs();
+        drop(peers);
+
+        if addrs.is_empty() {
+            continue;
+        }
+
+        // Cria socket temporário para enviar heartbeats
+        let socket = match UdpSocket::bind("0.0.0.0:0").await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to create heartbeat socket: {}", e);
+                continue;
+            }
+        };
+
+        let heartbeat = NetworkMessage::Heartbeat {
+            node_id: node.node_id.clone(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+
+        if let Ok(data) = serde_json::to_vec(&heartbeat) {
+            for addr in &addrs {
+                let _ = socket.send_to(&data, addr).await;
+            }
+        }
+
+        // Registra miss para peers que não responderam
+        let mut states = peer_states.write().await;
+        for addr in &addrs {
+            if let Some(state) = states.get_mut(addr) {
+                // Se último heartbeat foi há mais de 30s, conta como miss
+                if state.is_inactive(30) {
+                    state.record_miss();
+                }
+            } else {
+                states.insert(*addr, PeerState::new());
+            }
+        }
+    }
+}
+
+/// Monitora peers inativos e os remove da TrustedPeerList.
+async fn run_heartbeat_monitor(
+    peer_states: Arc<RwLock<HashMap<SocketAddr, PeerState>>>,
+    trusted_peers: Arc<RwLock<TrustedPeerList>>,
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+
+    loop {
+        interval.tick().await;
+
+        let states = peer_states.read().await;
+        let mut to_remove = Vec::new();
+
+        for (addr, state) in states.iter() {
+            // Remove peer se inativo por mais de 5 minutos
+            if state.is_inactive(300) {
+                eprintln!(
+                    "⚠ Peer {} inactive for >5 min (misses: {})",
+                    addr, state.consecutive_misses
+                );
+                to_remove.push(*addr);
+            }
+            // Avisa se peer está suspeito (2+ misses)
+            else if state.consecutive_misses >= 2 {
+                eprintln!(
+                    "⚠ Peer {} has {} consecutive misses",
+                    addr, state.consecutive_misses
+                );
+            }
+        }
+        drop(states);
+
+        // Remove peers inativos
+        if !to_remove.is_empty() {
+            let mut peers = trusted_peers.write().await;
+            let mut states = peer_states.write().await;
+            for addr in &to_remove {
+                peers.remove(addr);
+                states.remove(addr);
+                eprintln!("✗ Peer {} removed from trusted list (inactive)", addr);
+            }
+        }
+    }
 }
 
 async fn run_discovery(

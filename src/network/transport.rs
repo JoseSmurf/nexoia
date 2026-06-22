@@ -1,4 +1,5 @@
 use crate::network::epa::SharedEPA;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -20,6 +21,14 @@ pub enum NetworkMessage {
         node_id: String,
         address: String,
     },
+    // Heartbeat
+    Heartbeat {
+        node_id: String,
+        timestamp: String,
+    },
+    HeartbeatAck {
+        node_id: String,
+    },
     // Handshake
     Hello {
         node_id: String,
@@ -38,6 +47,38 @@ pub enum NetworkMessage {
     HandshakeFailed {
         reason: String,
     },
+}
+
+/// Estado de um peer para controle de heartbeat.
+#[derive(Debug, Clone)]
+pub struct PeerState {
+    pub last_heartbeat: DateTime<Utc>,
+    pub consecutive_misses: u32,
+}
+
+impl PeerState {
+    pub fn new() -> Self {
+        Self {
+            last_heartbeat: Utc::now(),
+            consecutive_misses: 0,
+        }
+    }
+
+    /// Registra heartbeat recebido.
+    pub fn record_heartbeat(&mut self) {
+        self.last_heartbeat = Utc::now();
+        self.consecutive_misses = 0;
+    }
+
+    /// Registra miss (heartbeat não recebido).
+    pub fn record_miss(&mut self) {
+        self.consecutive_misses += 1;
+    }
+
+    /// Verifica se o peer está inativo (sem resposta por muito tempo).
+    pub fn is_inactive(&self, timeout_secs: i64) -> bool {
+        Utc::now() - self.last_heartbeat > chrono::Duration::seconds(timeout_secs)
+    }
 }
 
 /// Peer autenticado via handshake.
@@ -97,6 +138,10 @@ impl TrustedPeerList {
 
     pub fn addrs(&self) -> Vec<SocketAddr> {
         self.peers.keys().copied().collect()
+    }
+
+    pub fn remove(&mut self, addr: &SocketAddr) -> bool {
+        self.peers.remove(addr).is_some()
     }
 }
 

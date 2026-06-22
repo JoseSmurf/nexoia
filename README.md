@@ -2,6 +2,45 @@
 
 Rede de auditoria descentralizada. Nós executam pipeline determinístico local e compartilham EPAs (Evidence-Proof-Artifacts) verificáveis.
 
+## Arquitetura
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         NexoIA Node                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐     │
+│  │ defense │───▶│   ai    │───▶│ quality │───▶│decision │     │
+│  │ (valida)│    │(traduz) │    │(avalia) │    │(decide) │     │
+│  └─────────┘    └─────────┘    └─────────┘    └─────────┘     │
+│       │                                            │            │
+│       ▼                                            ▼            │
+│  ┌─────────┐                                 ┌─────────┐       │
+│  │  state  │                                 │ evidence│       │
+│  └─────────┘                                 └─────────┘       │
+│                                                 │               │
+│                                                 ▼               │
+│                                          ┌─────────────┐       │
+│                                          │   manifest   │       │
+│                                          └─────────────┘       │
+│                                                 │               │
+│                                                 ▼               │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                      network                            │   │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────┐ │   │
+│  │  │ identity │  │   epa    │  │ transport│  │   api  │ │   │
+│  │  └──────────┘  └──────────┘  └──────────┘  └────────┘ │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │  Other Nodes    │
+                    │  (UDP/API)      │
+                    └─────────────────┘
+```
+
 ## Quick Start
 
 ```bash
@@ -25,24 +64,43 @@ NEXOIA_API_PORT=3001 NEXOIA_UDP_PORT=9001 cargo run
 
 ## API HTTP
 
-| Endpoint | Método | Descrição |
-|----------|--------|-----------|
-| `/health` | GET | Health check |
-| `/node` | GET | Info do nó |
-| `/epa/list` | GET | Lista de EPAs recebidos |
-| `/epa` | POST | Enviar EPA |
-| `/epa/:id/verify` | POST | Verificar EPA |
+### Endpoints
 
-## Arquitetura
+| Endpoint | Método | Descrição | Response |
+|----------|--------|-----------|----------|
+| `/health` | GET | Health check | `{"status": "ok", "message": "..."}` |
+| `/node` | GET | Info do nó | `{"node_id": "...", "epa_count": 0}` |
+| `/epa/list` | GET | Lista de EPAs | `[{epa_object}, ...]` |
+| `/epa` | POST | Enviar EPA | `{"status": "accepted", "message": "..."}` |
+| `/epa/:id/verify` | POST | Verificar EPA | `{"result": "VALID", "epa_id": "..."}` |
 
-```
-State → defense (valida) → ai (traduz) → quality (avalia) → decision (decide) → evidence → manifest → network
+### Exemplos
+
+```bash
+# Health check
+curl http://localhost:3000/health
+
+# Ver info do nó
+curl http://localhost:3000/node
+
+# Listar EPAs
+curl http://localhost:3000/epa/list
+
+# Enviar EPA
+curl -X POST http://localhost:3000/epa \
+  -H "Content-Type: application/json" \
+  -d @epa.json
+
+# Verificar EPA
+curl -X POST http://localhost:3000/epa/abc123/verify \
+  -H "Content-Type: application/json" \
+  -d '{"state_json": "...", "evidence_jsonl": "..."}'
 ```
 
 ## Persistência
 
-- `identity.json` — Identidade do nó (sobrevive restarts)
-- `network.json` — Peers e EPAs (sobrevive restarts)
+- `.nexoia/identity.json` — Identidade do nó (sobrevive restarts)
+- `.nexoia/network.json` — Peers e EPAs (sobrevive restarts)
 
 ## Testes
 

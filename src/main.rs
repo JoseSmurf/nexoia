@@ -117,6 +117,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         node_id: node.node_id.clone(),
         public_key: node.public_key.clone(),
         epas: Arc::clone(&epas),
+        rate_limiter: api::RateLimiter::new(100, Duration::from_secs(60)),
     };
 
     let udp_socket = UdpTransport::bind(udp_addr).await?;

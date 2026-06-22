@@ -99,7 +99,21 @@ pub fn save_data(path: &Path, data: &PersistedData) -> Result<(), std::io::Error
     }
     let json = serde_json::to_string_pretty(data)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(path, json)
+
+    // Escrita atômica: escreve em arquivo temporário + rename
+    // Isso previne corrupção se o nó crashar no meio da escrita
+    let temp_path = path.with_extension("json.tmp");
+    std::fs::write(&temp_path, &json)?;
+
+    // Rename é atômico no Unix, garante que ou o arquivo antigo ou o novo existe
+    #[cfg(unix)]
+    std::fs::rename(&temp_path, path)?;
+
+    // No Windows, rename não é atômico, mas é a melhor opção disponível
+    #[cfg(not(unix))]
+    std::fs::rename(&temp_path, path)?;
+
+    Ok(())
 }
 
 pub fn parse_peers(peers: &[String]) -> Vec<SocketAddr> {

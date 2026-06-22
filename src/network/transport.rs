@@ -55,6 +55,7 @@ pub enum NetworkMessage {
 }
 
 /// Estado de um peer para controle de heartbeat e reconexão.
+/// Usa sliding window para ser tolerante a latência e packet loss.
 #[derive(Debug, Clone)]
 pub struct PeerState {
     pub last_heartbeat: DateTime<Utc>,
@@ -62,7 +63,15 @@ pub struct PeerState {
     pub last_seen: DateTime<Utc>,
     pub reconnect_attempts: u32,
     pub next_reconnect: DateTime<Utc>,
+    /// Janela de heartbeat: armazena os últimos N heartbeats recebidos
+    pub heartbeat_window: Vec<DateTime<Utc>>,
 }
+
+/// Tamanho da janela de heartbeat para sliding window.
+const HEARTBEAT_WINDOW_SIZE: usize = 5;
+
+/// Número mínimo de misses na janela para considerar inativo.
+const MIN_MISSES_FOR_INACTIVE: u32 = 3;
 
 impl PeerState {
     pub fn new() -> Self {
@@ -72,15 +81,23 @@ impl PeerState {
             last_seen: Utc::now(),
             reconnect_attempts: 0,
             next_reconnect: Utc::now(),
+            heartbeat_window: Vec::with_capacity(HEARTBEAT_WINDOW_SIZE),
         }
     }
 
-    /// Registra heartbeat recebido.
+    /// Registra heartbeat recebido (sliding window).
     pub fn record_heartbeat(&mut self) {
-        self.last_heartbeat = Utc::now();
-        self.last_seen = Utc::now();
+        let now = Utc::now();
+        self.last_heartbeat = now;
+        self.last_seen = now;
         self.consecutive_misses = 0;
         self.reconnect_attempts = 0;
+
+        // Adiciona à janela e mantém apenas os últimos N
+        self.heartbeat_window.push(now);
+        if self.heartbeat_window.len() > HEARTBEAT_WINDOW_SIZE {
+            self.heartbeat_window.remove(0);
+        }
     }
 
     /// Registra miss (heartbeat não recebido).
@@ -88,21 +105,34 @@ impl PeerState {
         self.consecutive_misses += 1;
     }
 
-    /// Verifica se o peer está inativo (sem resposta por muito tempo).
+    /// Verifica se o peer está inativo usando sliding window.
+    /// Retorna true se mais de MIN_MISSES_FOR_INACTIVE misses na janela.
     pub fn is_inactive(&self, timeout_secs: i64) -> bool {
-        Utc::now() - self.last_heartbeat > chrono::Duration::seconds(timeout_secs)
+        // Usa o último heartbeat registrado, não o tempo atual
+        // para ser mais tolerante a latência
+        if self.heartbeat_window.is_empty() {
+            return true;
+        }
+
+        let last = self.heartbeat_window.last().unwrap();
+        let age = Utc::now() - *last;
+
+        // Inativo se: idade > timeout E misses suficientes
+        age > chrono::Duration::seconds(timeout_secs)
+            && self.consecutive_misses >= MIN_MISSES_FOR_INACTIVE
     }
 
     /// Calcula próximo tempo de reconexão com backoff exponencial.
     pub fn schedule_reconnect(&mut self) {
         self.reconnect_attempts += 1;
+        // Backoff: 10s, 20s, 40s, 80s, 160s (máx 5 tentativas)
         let backoff_secs = (2u32.pow(self.reconnect_attempts.min(5)) * 5) as i64;
         self.next_reconnect = Utc::now() + chrono::Duration::seconds(backoff_secs);
     }
 
     /// Verifica se é hora de tentar reconexão.
     pub fn should_reconnect(&self) -> bool {
-        Utc::now() >= self.next_reconnect
+        Utc::now() >= self.next_reconnect && self.reconnect_attempts <= 5
     }
 }
 

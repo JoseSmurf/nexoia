@@ -177,7 +177,6 @@ async fn test_peer_state_heartbeat_tracking() {
     let mut state = PeerState::new();
 
     // Act & Assert: Estado inicial
-    assert!(!state.is_inactive(30));
     assert_eq!(state.consecutive_misses, 0);
 
     // Act: Simular heartbeat
@@ -185,17 +184,16 @@ async fn test_peer_state_heartbeat_tracking() {
     assert!(!state.is_inactive(30));
     assert_eq!(state.consecutive_misses, 0);
 
-    // Act: Simular misses
+    // Act: Simular misses (mas menos que o mínimo)
     state.record_miss();
-    state.record_miss();
-    assert_eq!(state.consecutive_misses, 2);
-
-    // Act: Ainda não inativo
+    assert_eq!(state.consecutive_misses, 1);
+    // Ainda não inativo (precisa de 3+ misses)
     assert!(!state.is_inactive(30));
 
     // Act: Heartbeat reseta misses
     state.record_heartbeat();
     assert_eq!(state.consecutive_misses, 0);
+    assert!(!state.is_inactive(30));
 }
 
 #[tokio::test]

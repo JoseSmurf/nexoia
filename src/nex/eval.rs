@@ -1,4 +1,6 @@
-use crate::nex::ast::{Action, Comparator, Condition, Expr, LogicalOp, Program, Stmt, Type};
+use crate::nex::ast::{
+    Action, Comparator, Condition, Expr, LogicalOp, Program, ReactiveAction, Stmt, Trigger, Type,
+};
 use crate::provenance::typed_node::Marker;
 use crate::provenance::{
     Anchored, InsufficientWitnessesError, Local, Signed, TypedNode, Unverifiable, Witness,
@@ -333,6 +335,10 @@ fn execute_expanded(program: Program) -> Result<ExecutionResult, EvalError> {
                     granted,
                     reason: (!granted).then_some("ActionDenied".to_string()),
                 }));
+            }
+            Stmt::On { .. } => {
+                // On statements são registrados mas não executados imediatamente
+                // Eles são processados pelo motor de eventos externo
             }
             Stmt::If {
                 condition,

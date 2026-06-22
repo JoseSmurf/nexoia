@@ -2,7 +2,7 @@ use crate::types::EvidenceStrength;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Program {
     pub statements: Vec<Stmt>,
 }
@@ -26,7 +26,7 @@ impl fmt::Display for Action {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Stmt {
     Use {
         path: String,
@@ -60,6 +60,10 @@ pub enum Stmt {
         condition: Condition,
         then_body: Vec<Stmt>,
         else_body: Vec<Stmt>,
+    },
+    On {
+        trigger: Trigger,
+        actions: Vec<ReactiveAction>,
     },
 }
 
@@ -95,7 +99,7 @@ pub enum LogicalOp {
 }
 
 /// Condição composta: `evidence >= strength && evidence2 >= strength2`
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Condition {
     pub left_id: String,
     pub comparator: Comparator,
@@ -104,4 +108,22 @@ pub struct Condition {
     pub right_id: Option<String>,
     pub right_comparator: Option<Comparator>,
     pub right_strength2: Option<EvidenceStrength>,
+}
+
+/// Tipo de trigger para comportamentos reativos.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Trigger {
+    HeartbeatMiss { threshold: u32 },
+    ReputationBelow { threshold: f32 },
+    PeerConnected,
+    PeerDisconnected,
+}
+
+/// Ação permitida em comportamentos reativos.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReactiveAction {
+    Log(String),
+    Emit(String),
+    MarkInactive { peer: String },
+    AdjustReputation { peer: String, delta: i32 },
 }

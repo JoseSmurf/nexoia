@@ -3,7 +3,10 @@ use std::error::Error;
 use std::fmt;
 
 use super::{
-    ast::{Action, Comparator, Condition, Expr, LogicalOp, Program, Stmt, Type},
+    ast::{
+        Action, Comparator, Condition, Expr, LogicalOp, Program, ReactiveAction, Stmt, Trigger,
+        Type,
+    },
     NEX_VERSION,
 };
 
@@ -50,19 +53,24 @@ impl fmt::Display for ParseError {
 
 impl Error for ParseError {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct Token {
     kind: TokenKind,
     column: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum TokenKind {
     Word(String),
     Int(i64),
+    Float(f32),
     Str(String),
     Eq,
     Gte,
+    Gt,
+    Lt,
+    Colon,
+    Comma,
 }
 
 impl TokenKind {
@@ -70,9 +78,14 @@ impl TokenKind {
         match self {
             Self::Word(value) => value.clone(),
             Self::Int(value) => value.to_string(),
+            Self::Float(value) => value.to_string(),
             Self::Str(value) => format!("{value:?}"),
             Self::Eq => "=".to_string(),
             Self::Gte => ">=".to_string(),
+            Self::Gt => ">".to_string(),
+            Self::Lt => "<".to_string(),
+            Self::Colon => ":".to_string(),
+            Self::Comma => ",".to_string(),
         }
     }
 }
@@ -156,6 +169,34 @@ fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
                     column,
                 }
             }
+            '>' => {
+                idx += 1;
+                Token {
+                    kind: TokenKind::Gt,
+                    column,
+                }
+            }
+            '<' => {
+                idx += 1;
+                Token {
+                    kind: TokenKind::Lt,
+                    column,
+                }
+            }
+            ':' => {
+                idx += 1;
+                Token {
+                    kind: TokenKind::Colon,
+                    column,
+                }
+            }
+            ',' => {
+                idx += 1;
+                Token {
+                    kind: TokenKind::Comma,
+                    column,
+                }
+            }
             '"' => {
                 idx += 1;
                 let mut value = String::new();
@@ -210,17 +251,39 @@ fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
                 while chars.get(idx).is_some_and(|next| next.is_ascii_digit()) {
                     idx += 1;
                 }
-                let text: String = chars[start..idx].iter().collect();
-                let value = text.parse::<i64>().map_err(|err| {
-                    ParseError::new(
-                        line_no,
+                // Verifica se é float
+                if chars.get(idx) == Some(&'.')
+                    && chars.get(idx + 1).is_some_and(|next| next.is_ascii_digit())
+                {
+                    idx += 1;
+                    while chars.get(idx).is_some_and(|next| next.is_ascii_digit()) {
+                        idx += 1;
+                    }
+                    let text: String = chars[start..idx].iter().collect();
+                    let value = text.parse::<f32>().map_err(|err| {
+                        ParseError::new(
+                            line_no,
+                            column,
+                            format!("invalid float literal '{text}': {err}"),
+                        )
+                    })?;
+                    Token {
+                        kind: TokenKind::Float(value),
                         column,
-                        format!("invalid integer literal '{text}': {err}"),
-                    )
-                })?;
-                Token {
-                    kind: TokenKind::Int(value),
-                    column,
+                    }
+                } else {
+                    let text: String = chars[start..idx].iter().collect();
+                    let value = text.parse::<i64>().map_err(|err| {
+                        ParseError::new(
+                            line_no,
+                            column,
+                            format!("invalid integer literal '{text}': {err}"),
+                        )
+                    })?;
+                    Token {
+                        kind: TokenKind::Int(value),
+                        column,
+                    }
                 }
             }
             other if other.is_ascii_digit() => {
@@ -229,17 +292,39 @@ fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
                 while chars.get(idx).is_some_and(|next| next.is_ascii_digit()) {
                     idx += 1;
                 }
-                let text: String = chars[start..idx].iter().collect();
-                let value = text.parse::<i64>().map_err(|err| {
-                    ParseError::new(
-                        line_no,
+                // Verifica se é float
+                if chars.get(idx) == Some(&'.')
+                    && chars.get(idx + 1).is_some_and(|next| next.is_ascii_digit())
+                {
+                    idx += 1;
+                    while chars.get(idx).is_some_and(|next| next.is_ascii_digit()) {
+                        idx += 1;
+                    }
+                    let text: String = chars[start..idx].iter().collect();
+                    let value = text.parse::<f32>().map_err(|err| {
+                        ParseError::new(
+                            line_no,
+                            column,
+                            format!("invalid float literal '{text}': {err}"),
+                        )
+                    })?;
+                    Token {
+                        kind: TokenKind::Float(value),
                         column,
-                        format!("invalid integer literal '{text}': {err}"),
-                    )
-                })?;
-                Token {
-                    kind: TokenKind::Int(value),
-                    column,
+                    }
+                } else {
+                    let text: String = chars[start..idx].iter().collect();
+                    let value = text.parse::<i64>().map_err(|err| {
+                        ParseError::new(
+                            line_no,
+                            column,
+                            format!("invalid integer literal '{text}': {err}"),
+                        )
+                    })?;
+                    Token {
+                        kind: TokenKind::Int(value),
+                        column,
+                    }
                 }
             }
             other => {
@@ -252,6 +337,9 @@ fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
                         || next == '='
                         || next == '"'
                         || next == '>'
+                        || next == '<'
+                        || next == ':'
+                        || next == ','
                         || (next == '/' && chars.get(idx + 1) == Some(&'/'))
                     {
                         break;
@@ -292,6 +380,7 @@ fn parse_statement(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError>
         "assert" => parse_assert(tokens, line_no),
         "act" => parse_act(tokens, line_no),
         "if" => parse_if(tokens, line_no),
+        "on" => parse_on(tokens, line_no),
         other => Err(ParseError::new(
             line_no,
             first.column,
@@ -665,6 +754,210 @@ fn parse_if(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError> {
         "expected ':' after condition in if statement",
     ))
 }
+
+fn parse_on(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError> {
+    // on <trigger>: <action>
+    let trigger_token = tokens.get(1).ok_or_else(|| {
+        ParseError::new(line_no, tokens[0].column + 1, "expected trigger after 'on'")
+    })?;
+    let trigger_word = word(trigger_token, line_no)?;
+
+    let trigger = match trigger_word.as_str() {
+        "heartbeat_miss" => {
+            // on heartbeat_miss > <threshold>:
+            let gt_token = tokens.get(2).ok_or_else(|| {
+                ParseError::new(
+                    line_no,
+                    trigger_token.column + 1,
+                    "expected '>' after 'heartbeat_miss'",
+                )
+            })?;
+            if !matches!(gt_token.kind, TokenKind::Gt) {
+                return Err(ParseError::new(
+                    line_no,
+                    gt_token.column,
+                    "expected '>' after 'heartbeat_miss'",
+                ));
+            }
+            let threshold_token = tokens.get(3).ok_or_else(|| {
+                ParseError::new(line_no, gt_token.column, "missing threshold after '>'")
+            })?;
+            let threshold = match &threshold_token.kind {
+                TokenKind::Int(value) => *value as u32,
+                _ => {
+                    return Err(ParseError::new(
+                        line_no,
+                        threshold_token.column,
+                        "expected integer threshold",
+                    ))
+                }
+            };
+            Trigger::HeartbeatMiss { threshold }
+        }
+        "reputation" => {
+            // on reputation < <threshold>:
+            let lt_token = tokens.get(2).ok_or_else(|| {
+                ParseError::new(
+                    line_no,
+                    trigger_token.column + 1,
+                    "expected '<' after 'reputation'",
+                )
+            })?;
+            if !matches!(lt_token.kind, TokenKind::Lt) {
+                return Err(ParseError::new(
+                    line_no,
+                    lt_token.column,
+                    "expected '<' after 'reputation'",
+                ));
+            }
+            let threshold_token = tokens.get(3).ok_or_else(|| {
+                ParseError::new(line_no, lt_token.column, "missing threshold after '<'")
+            })?;
+            let threshold = match &threshold_token.kind {
+                TokenKind::Float(value) => *value,
+                TokenKind::Int(value) => *value as f32,
+                _ => {
+                    return Err(ParseError::new(
+                        line_no,
+                        threshold_token.column,
+                        "expected float threshold",
+                    ))
+                }
+            };
+            Trigger::ReputationBelow { threshold }
+        }
+        "peer_connected" => Trigger::PeerConnected,
+        "peer_disconnected" => Trigger::PeerDisconnected,
+        _ => {
+            return Err(ParseError::new(
+                line_no,
+                trigger_token.column,
+                format!("unknown trigger '{trigger_word}'"),
+            ))
+        }
+    };
+
+    // Espera ':' após trigger
+    let colon_token = tokens.get(4).ok_or_else(|| {
+        ParseError::new(line_no, tokens[3].column + 1, "expected ':' after trigger")
+    })?;
+    if !matches!(colon_token.kind, TokenKind::Colon) {
+        return Err(ParseError::new(
+            line_no,
+            colon_token.column,
+            "expected ':' after trigger",
+        ));
+    }
+
+    // Parse ações (a partir do token 5)
+    let mut actions = Vec::new();
+    let mut idx = 5;
+
+    while idx < tokens.len() {
+        let action = parse_reactive_action(tokens, &mut idx, line_no)?;
+        actions.push(action);
+
+        // Espera ',' entre ações ou ':' para indicar fim
+        if idx < tokens.len() {
+            if matches!(tokens[idx].kind, TokenKind::Comma) {
+                idx += 1; // consome ','
+            } else {
+                break; // fim das ações
+            }
+        }
+    }
+
+    Ok(Stmt::On { trigger, actions })
+}
+
+fn parse_reactive_action(
+    tokens: &[Token],
+    idx: &mut usize,
+    line_no: usize,
+) -> Result<ReactiveAction, ParseError> {
+    let token = tokens
+        .get(*idx)
+        .ok_or_else(|| ParseError::new(line_no, *idx + 1, "expected action"))?;
+    let action_word = word(token, line_no)?;
+
+    match action_word.as_str() {
+        "log" => {
+            *idx += 1;
+            let msg_token = tokens.get(*idx).ok_or_else(|| {
+                ParseError::new(line_no, token.column, "expected string after 'log'")
+            })?;
+            let msg = match &msg_token.kind {
+                TokenKind::Str(value) => value.clone(),
+                _ => {
+                    return Err(ParseError::new(
+                        line_no,
+                        msg_token.column,
+                        "expected string after 'log'",
+                    ))
+                }
+            };
+            *idx += 1;
+            Ok(ReactiveAction::Log(msg))
+        }
+        "emit" => {
+            *idx += 1;
+            let event_token = tokens.get(*idx).ok_or_else(|| {
+                ParseError::new(line_no, token.column, "expected event name after 'emit'")
+            })?;
+            let event = word(event_token, line_no)?;
+            *idx += 1;
+            Ok(ReactiveAction::Emit(event))
+        }
+        "marcar_inativo" => {
+            *idx += 1;
+            let peer_token = tokens.get(*idx).ok_or_else(|| {
+                ParseError::new(
+                    line_no,
+                    token.column,
+                    "expected peer name after 'marcar_inativo'",
+                )
+            })?;
+            let peer = word(peer_token, line_no)?;
+            *idx += 1;
+            Ok(ReactiveAction::MarkInactive { peer })
+        }
+        "ajustar_reputacao" => {
+            *idx += 1;
+            let peer_token = tokens.get(*idx).ok_or_else(|| {
+                ParseError::new(
+                    line_no,
+                    token.column,
+                    "expected peer name after 'ajustar_reputacao'",
+                )
+            })?;
+            let peer = word(peer_token, line_no)?;
+            *idx += 1;
+
+            let delta_token = tokens.get(*idx).ok_or_else(|| {
+                ParseError::new(line_no, peer_token.column, "expected delta value")
+            })?;
+            let delta = match &delta_token.kind {
+                TokenKind::Int(value) => *value as i32,
+                _ => {
+                    return Err(ParseError::new(
+                        line_no,
+                        delta_token.column,
+                        "expected integer delta",
+                    ))
+                }
+            };
+            *idx += 1;
+            Ok(ReactiveAction::AdjustReputation { peer, delta })
+        }
+        _ => Err(ParseError::new(
+            line_no,
+            token.column,
+            format!("unknown action '{action_word}'"),
+        )),
+    }
+}
+
+// Tokens para comparação e operadores lógicos
 
 fn parse_import_path(token: &Token, line_no: usize) -> Result<String, ParseError> {
     let path = word(token, line_no)?;

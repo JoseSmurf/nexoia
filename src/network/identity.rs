@@ -1,4 +1,5 @@
 use crate::hash::canonical_hash;
+use crate::network::crypto::KeyPair;
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -7,17 +8,19 @@ use std::fmt;
 use std::path::Path;
 
 /// Identidade do nó na rede P2P.
-/// Usa Ed25519 para assinatura e verificação de mensagens.
+/// Usa Ed25519 para assinatura e X25519 para encriptação.
 #[derive(Clone)]
 pub struct NodeIdentity {
     pub node_id: String,
     pub public_key: String,
     pub created_at: String,
     signing_key: SigningKey,
+    /// Par de chaves X25519 para encriptação de payload
+    pub encryption_keypair: KeyPair,
 }
 
 impl NodeIdentity {
-    /// Gera nova identidade com chaves Ed25519 aleatórias.
+    /// Gera nova identidade com chaves Ed25519 e X25519 aleatórias.
     pub fn generate(name: &str) -> Self {
         let mut secret_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut secret_bytes);
@@ -28,11 +31,15 @@ impl NodeIdentity {
         let timestamp = chrono::Utc::now().to_rfc3339();
         let node_id = canonical_hash(&format!("node:{}:{}", name, public_key));
 
+        // Gera par de chaves X25519 para encriptação
+        let encryption_keypair = KeyPair::generate();
+
         Self {
             node_id,
             public_key,
             created_at: timestamp,
             signing_key,
+            encryption_keypair,
         }
     }
 
@@ -48,11 +55,27 @@ impl NodeIdentity {
             })?;
             let signing_key = SigningKey::from_bytes(&key_bytes);
 
+            // Carrega par de chaves X25519
+            let encryption_keypair = if !saved.encryption_secret_bytes.is_empty() {
+                let secret_bytes: [u8; 32] =
+                    saved.encryption_secret_bytes.try_into().map_err(|_| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "invalid encryption key",
+                        )
+                    })?;
+                KeyPair::from_secret(secret_bytes)
+            } else {
+                // Compatibilidade com identidades antigas
+                KeyPair::generate()
+            };
+
             Ok(Self {
                 node_id: saved.node_id,
                 public_key: saved.public_key,
                 created_at: saved.created_at,
                 signing_key,
+                encryption_keypair,
             })
         } else {
             let identity = Self::generate(name);
@@ -61,7 +84,7 @@ impl NodeIdentity {
         }
     }
 
-    /// Salva identidade (incluindo chave privada) em arquivo.
+    /// Salva identidade (incluindo chaves privadas) em arquivo.
     /// Força permissões 0600 no Unix (somente owner pode ler/escrever).
     pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
         if let Some(parent) = path.parent() {
@@ -72,6 +95,8 @@ impl NodeIdentity {
             public_key: self.public_key.clone(),
             created_at: self.created_at.clone(),
             secret_key_bytes: self.signing_key.to_bytes().to_vec(),
+            encryption_secret_bytes: self.encryption_keypair.secret_bytes().to_vec(),
+            encryption_public_bytes: self.encryption_keypair.public_bytes().to_vec(),
         };
         let data = serde_json::to_string_pretty(&saved)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -106,6 +131,8 @@ impl Serialize for NodeIdentity {
             public_key: self.public_key.clone(),
             created_at: self.created_at.clone(),
             secret_key_bytes: self.signing_key.to_bytes().to_vec(),
+            encryption_secret_bytes: self.encryption_keypair.secret_bytes().to_vec(),
+            encryption_public_bytes: self.encryption_keypair.public_bytes().to_vec(),
         };
         saved.serialize(serializer)
     }
@@ -120,11 +147,23 @@ impl<'de> Deserialize<'de> for NodeIdentity {
             .map_err(|_| serde::de::Error::custom("invalid key length"))?;
         let signing_key = SigningKey::from_bytes(&key_bytes);
 
+        // Carrega par de chaves X25519
+        let encryption_keypair = if !saved.encryption_secret_bytes.is_empty() {
+            let secret_bytes: [u8; 32] = saved
+                .encryption_secret_bytes
+                .try_into()
+                .map_err(|_| serde::de::Error::custom("invalid encryption key"))?;
+            KeyPair::from_secret(secret_bytes)
+        } else {
+            KeyPair::generate()
+        };
+
         Ok(Self {
             node_id: saved.node_id,
             public_key: saved.public_key,
             created_at: saved.created_at,
             signing_key,
+            encryption_keypair,
         })
     }
 }
@@ -135,6 +174,8 @@ struct SavedIdentity {
     public_key: String,
     created_at: String,
     secret_key_bytes: Vec<u8>,
+    encryption_secret_bytes: Vec<u8>,
+    encryption_public_bytes: Vec<u8>,
 }
 
 impl fmt::Display for NodeIdentity {

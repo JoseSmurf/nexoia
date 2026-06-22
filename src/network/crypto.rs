@@ -7,6 +7,7 @@ use sha2::Sha256;
 use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
 
 /// Par de chaves X25519 para troca segura.
+#[derive(Clone)]
 pub struct KeyPair {
     pub public_key: PublicKey,
     secret: StaticSecret,
@@ -20,9 +21,21 @@ impl KeyPair {
         Self { public_key, secret }
     }
 
+    /// Cria par de chaves a partir de secret bytes (para carregar de arquivo).
+    pub fn from_secret(secret_bytes: [u8; 32]) -> Self {
+        let secret = StaticSecret::from(secret_bytes);
+        let public_key = PublicKey::from(&secret);
+        Self { public_key, secret }
+    }
+
     /// Retorna a chave pública como bytes.
     pub fn public_bytes(&self) -> [u8; 32] {
         self.public_key.to_bytes()
+    }
+
+    /// Retorna a chave privada como bytes (para persistência).
+    pub fn secret_bytes(&self) -> [u8; 32] {
+        self.secret.to_bytes()
     }
 
     /// Deriva shared secret com outro nó e cria cipher para encriptação.

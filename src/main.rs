@@ -5,6 +5,7 @@ mod evidence;
 mod explain;
 mod hash;
 mod network;
+mod nex;
 mod provenance;
 mod quality;
 mod state;
@@ -21,6 +22,8 @@ use crate::network::transport::{
     NetworkMessage, PeerList, PeerState, TrustedPeer, TrustedPeerList, UdpTransport,
 };
 use crate::network::verify::{verify_epa, VerifyResult};
+use crate::nex::action_executor::ActionExecutor;
+use crate::nex::reactive::{NetworkEvent, ReactiveEngine};
 use crate::state::State;
 use crate::types::EvidenceProvider;
 use serde::Serialize;
@@ -244,10 +247,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Spawn heartbeat monitor (remove inactive peers)
+    // Spawn heartbeat monitor com ReactiveEngine
     let peer_states_monitor = Arc::clone(&peer_states);
     let trusted_monitor = Arc::clone(&trusted_peers);
+    let reputation_monitor = Arc::clone(&reputation);
+    let mut reactive_engine = ReactiveEngine::new();
+
+    // Adiciona regras reativas padrão
+    reactive_engine.add_rule(crate::nex::reactive::ReactiveRule {
+        trigger: crate::nex::ast::Trigger::HeartbeatMiss { threshold: 3 },
+        actions: vec![crate::nex::ast::ReactiveAction::Log(
+            "Peer possivelmente inativo".to_string(),
+        )],
+    });
+    reactive_engine.add_rule(crate::nex::reactive::ReactiveRule {
+        trigger: crate::nex::ast::Trigger::HeartbeatMiss { threshold: 5 },
+        actions: vec![crate::nex::ast::ReactiveAction::MarkInactive {
+            peer: "default".to_string(),
+        }],
+    });
+
     tokio::spawn(async move {
-        run_heartbeat_monitor(peer_states_monitor, trusted_monitor).await;
+        run_heartbeat_monitor(
+            peer_states_monitor,
+            trusted_monitor,
+            reputation_monitor,
+            reactive_engine,
+        )
+        .await;
     });
 
     let node_clone = node.clone();
@@ -809,9 +836,12 @@ async fn run_heartbeat_sender(
 }
 
 /// Monitora peers inativos e gerencia reconexão.
+/// Integra o ReactiveEngine com eventos reais da rede.
 async fn run_heartbeat_monitor(
     peer_states: Arc<RwLock<HashMap<SocketAddr, PeerState>>>,
     trusted_peers: Arc<RwLock<TrustedPeerList>>,
+    reputation: Arc<RwLock<ReputationStore>>,
+    mut reactive_engine: ReactiveEngine,
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(60));
 
@@ -821,6 +851,7 @@ async fn run_heartbeat_monitor(
         let states = peer_states.read().await;
         let mut to_remove = Vec::new();
         let mut to_reconnect = Vec::new();
+        let mut events = Vec::new();
 
         for (addr, state) in states.iter() {
             // Remove peer se inativo por mais de 5 minutos
@@ -830,10 +861,16 @@ async fn run_heartbeat_monitor(
                     addr, state.consecutive_misses
                 );
                 to_remove.push(*addr);
+                events.push(NetworkEvent::PeerDisconnected {
+                    node_id: format!("peer_{}", addr),
+                });
             }
             // Tenta reconectar se peer tem misses mas ainda não expirou
             else if state.consecutive_misses >= 3 && state.should_reconnect() {
                 to_reconnect.push(*addr);
+                events.push(NetworkEvent::HeartbeatMiss {
+                    count: state.consecutive_misses,
+                });
             }
             // Avisa se peer está suspeito (2+ misses)
             else if state.consecutive_misses >= 2 {
@@ -841,9 +878,35 @@ async fn run_heartbeat_monitor(
                     "⚠ Peer {} has {} consecutive misses",
                     addr, state.consecutive_misses
                 );
+                events.push(NetworkEvent::HeartbeatMiss {
+                    count: state.consecutive_misses,
+                });
             }
         }
         drop(states);
+
+        // Processa eventos através do ReactiveEngine
+        let mut peer_addrs_map = HashMap::new();
+        {
+            let peer_list = trusted_peers.read().await;
+            for peer in peer_list.peers() {
+                peer_addrs_map.insert(peer.node_id.clone(), peer.addr);
+            }
+        }
+
+        for event in &events {
+            let result = reactive_engine.evaluate(event);
+            if result.matched {
+                let mut peer_states_mut = peer_states.write().await;
+                let mut rep = reputation.write().await;
+                let _report = ActionExecutor::execute(
+                    &result.actions,
+                    &mut peer_states_mut,
+                    &mut rep,
+                    &peer_addrs_map,
+                );
+            }
+        }
 
         // Remove peers inativos
         if !to_remove.is_empty() {

@@ -318,7 +318,7 @@ async fn run_discovery(
     node: NodeIdentity,
     udp_port: u16,
     broadcast_addr: SocketAddr,
-    peers: Arc<RwLock<PeerList>>,
+    _peers: Arc<RwLock<PeerList>>,
 ) {
     let discovery_socket = UdpSocket::bind("0.0.0.0:0").await.ok();
     if let Some(socket) = discovery_socket {

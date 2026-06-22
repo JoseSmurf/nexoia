@@ -1,5 +1,5 @@
 use crate::network::epa::SharedEPA;
-use crate::network::verify::{verify_epa, VerifyResult};
+use crate::network::verify::verify_epa;
 use axum::{
     extract::{Json, State},
     http::StatusCode,

@@ -127,10 +127,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Status de segurança da chave
     if passphrase.is_some() {
-        println!("Security:     🔐 PASSPHRASE ENABLED (keys encrypted)");
+        println!("Security:     🔐 Passphrase enabled — private keys encrypted");
     } else {
-        println!("Security:     ⚠️  NO PASSPHRASE (keys in plaintext)");
-        println!("              Set NEXOIA_PASSPHRASE to encrypt private keys.");
+        println!("Security:     ○  No passphrase — private keys stored in plaintext");
+        println!("              Tip: set NEXOIA_PASSPHRASE to encrypt keys at rest.");
     }
     println!();
 

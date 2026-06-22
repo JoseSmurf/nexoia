@@ -35,7 +35,62 @@ pub fn load_data(path: &Path) -> Result<PersistedData, std::io::Error> {
     let data = std::fs::read_to_string(path)?;
     let persisted: PersistedData = serde_json::from_str(&data)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    Ok(persisted)
+
+    // Validação e limpeza de dados corrompidos
+    let mut valid_peers = Vec::new();
+    let mut invalid_count = 0;
+    for peer_addr in &persisted.peers {
+        if peer_addr.parse::<SocketAddr>().is_ok() {
+            valid_peers.push(peer_addr.clone());
+        } else {
+            invalid_count += 1;
+        }
+    }
+    if invalid_count > 0 {
+        eprintln!(
+            "⚠ Skipped {} invalid peer addresses in network.json",
+            invalid_count
+        );
+    }
+
+    let mut valid_trusted = Vec::new();
+    let mut invalid_trusted = 0;
+    for trusted in &persisted.trusted_peers {
+        if trusted.node_id.is_empty() || trusted.addr.is_empty() {
+            invalid_trusted += 1;
+            continue;
+        }
+        if trusted.addr.parse::<SocketAddr>().is_err() {
+            invalid_trusted += 1;
+            continue;
+        }
+        valid_trusted.push(trusted.clone());
+    }
+    if invalid_trusted > 0 {
+        eprintln!(
+            "⚠ Skipped {} invalid trusted peers in network.json",
+            invalid_trusted
+        );
+    }
+
+    let mut valid_epas = Vec::new();
+    let mut invalid_epas = 0;
+    for epa in &persisted.epas {
+        if epa.epa_id.is_empty() || epa.node_id.is_empty() {
+            invalid_epas += 1;
+            continue;
+        }
+        valid_epas.push(epa.clone());
+    }
+    if invalid_epas > 0 {
+        eprintln!("⚠ Skipped {} invalid EPAs in network.json", invalid_epas);
+    }
+
+    Ok(PersistedData {
+        peers: valid_peers,
+        trusted_peers: valid_trusted,
+        epas: valid_epas,
+    })
 }
 
 pub fn save_data(path: &Path, data: &PersistedData) -> Result<(), std::io::Error> {

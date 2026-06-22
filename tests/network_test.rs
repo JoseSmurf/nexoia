@@ -48,7 +48,7 @@ async fn epa_sharing_between_nodes() {
 
     let (received, _) = transport_b.recv().await.unwrap();
     if let NetworkMessage::EPA(received_epa) = received {
-        assert!(received_epa.verify_integrity());
+        assert!(received_epa.verify_full().is_ok());
         assert_eq!(received_epa.epa_id, epa.epa_id);
     } else {
         panic!("Expected EPA message");
@@ -92,15 +92,7 @@ fn epa_verification_works() {
 
     let epa = SharedEPA::create(&node, state, evidence, decision, manifest);
 
-    let result = verify_epa(
-        &epa,
-        Some(state),
-        Some(evidence),
-        Some(decision),
-        Some(manifest),
-        Some(&node.public_key),
-    );
-
+    let result = verify_epa(&epa);
     assert!(matches!(result, VerifyResult::Valid));
 }
 

@@ -1,4 +1,5 @@
-use crate::network::epa::SharedEPA;
+use crate::network::epa::{SharedEPA, VerifyError};
+use crate::network::identity;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -7,6 +8,7 @@ pub enum VerifyResult {
     Valid,
     InvalidIntegrity,
     InvalidSignature,
+    TimestampExpired,
     MissingData,
 }
 
@@ -16,58 +18,27 @@ impl fmt::Display for VerifyResult {
             VerifyResult::Valid => write!(f, "VALID"),
             VerifyResult::InvalidIntegrity => write!(f, "INVALID_INTEGRITY"),
             VerifyResult::InvalidSignature => write!(f, "INVALID_SIGNATURE"),
+            VerifyResult::TimestampExpired => write!(f, "TIMESTAMP_EXPIRED"),
             VerifyResult::MissingData => write!(f, "MISSING_DATA"),
         }
     }
 }
 
-pub fn verify_epa(
-    epa: &SharedEPA,
-    state_json: Option<&str>,
-    evidence_jsonl: Option<&str>,
-    decisions_jsonl: Option<&str>,
-    manifest_json: Option<&str>,
-    public_key: Option<&str>,
-) -> VerifyResult {
-    if state_json.is_none()
-        || evidence_jsonl.is_none()
-        || decisions_jsonl.is_none()
-        || manifest_json.is_none()
-    {
-        return VerifyResult::MissingData;
+/// Verifica EPA completo: integridade + assinatura Ed25519 + timestamp.
+pub fn verify_epa(epa: &SharedEPA) -> VerifyResult {
+    match epa.verify_full() {
+        Ok(()) => VerifyResult::Valid,
+        Err(VerifyError::IntegrityFailed) => VerifyResult::InvalidIntegrity,
+        Err(VerifyError::SignatureFailed) => VerifyResult::InvalidSignature,
+        Err(VerifyError::TimestampExpired) => VerifyResult::TimestampExpired,
+        Err(VerifyError::TimestampInvalid) => VerifyResult::InvalidIntegrity,
+        Err(VerifyError::MissingPublicKey) => VerifyResult::InvalidSignature,
     }
-
-    if !epa.verify_integrity() {
-        return VerifyResult::InvalidIntegrity;
-    }
-
-    if let Some(key) = public_key {
-        if !epa.verify_signature(key) {
-            return VerifyResult::InvalidSignature;
-        }
-    }
-
-    VerifyResult::Valid
 }
 
-pub fn verify_hashes_match(
-    epa: &SharedEPA,
-    state_json: &str,
-    evidence_jsonl: &str,
-    decisions_jsonl: &str,
-    manifest_json: &str,
-) -> bool {
-    use crate::hash::canonical_hash;
-
-    let state_hash = canonical_hash(state_json);
-    let evidence_hash = canonical_hash(evidence_jsonl);
-    let decision_hash = canonical_hash(decisions_jsonl);
-    let manifest_hash = canonical_hash(manifest_json);
-
-    epa.state_hash == state_hash
-        && epa.evidence_hash == evidence_hash
-        && epa.decision_hash == decision_hash
-        && epa.manifest_hash == manifest_hash
+/// Verifica apenas a assinatura Ed25519 (para testes).
+pub fn verify_signature_only(public_key_hex: &str, data: &[u8], signature: &[u8]) -> bool {
+    identity::verify_signature(public_key_hex, data, signature).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -75,51 +46,33 @@ mod tests {
     use super::*;
     use crate::network::identity::NodeIdentity;
 
-    fn sample_epa() -> (SharedEPA, String, String, String, String, String) {
-        let node = NodeIdentity::generate("verifier_test");
-        let state = r#"{"project":"test"}"#.to_string();
-        let evidence = r#"{"evidence":"data"}"#.to_string();
-        let decision = r#"{"decision":"ok"}"#.to_string();
-        let manifest = r#"{"manifest":"v1"}"#.to_string();
-
-        let epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest);
-        (epa, state, evidence, decision, manifest, node.public_key)
-    }
-
     #[test]
     fn verify_valid_epa() {
-        let (epa, state, evidence, decision, manifest, public_key) = sample_epa();
-        let result = verify_epa(
-            &epa,
-            Some(&state),
-            Some(&evidence),
-            Some(&decision),
-            Some(&manifest),
-            Some(&public_key),
-        );
+        let node = NodeIdentity::generate("verifier_test");
+        let state = r#"{"project":"test"}"#;
+        let evidence = r#"{"evidence":"data"}"#;
+        let decision = r#"{"decision":"ok"}"#;
+        let manifest = r#"{"manifest":"v1"}"#;
+
+        let epa = SharedEPA::create(&node, state, evidence, decision, manifest);
+        let result = verify_epa(&epa);
         assert!(matches!(result, VerifyResult::Valid));
     }
 
     #[test]
-    fn verify_missing_data() {
-        let (epa, _, _, _, _, _) = sample_epa();
-        let result = verify_epa(&epa, None, None, None, None, None);
-        assert!(matches!(result, VerifyResult::MissingData));
-    }
+    fn verify_tampered_epa() {
+        let node = NodeIdentity::generate("verifier_test");
+        let (state, evidence, decision, manifest) = (
+            r#"{"project":"test"}"#.to_string(),
+            r#"{"evidence":"data"}"#.to_string(),
+            r#"{"decision":"ok"}"#.to_string(),
+            r#"{"manifest":"v1"}"#.to_string(),
+        );
 
-    #[test]
-    fn test_verify_hashes_match() {
-        let (epa, state, evidence, decision, manifest, _) = sample_epa();
-        assert!(verify_hashes_match(
-            &epa, &state, &evidence, &decision, &manifest
-        ));
-    }
+        let mut epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest);
+        epa.state_hash = "tampered".to_string();
 
-    #[test]
-    fn test_verify_hashes_dont_match() {
-        let (epa, _, _, _, _, _) = sample_epa();
-        assert!(!verify_hashes_match(
-            &epa, "wrong", "wrong", "wrong", "wrong"
-        ));
+        let result = verify_epa(&epa);
+        assert!(matches!(result, VerifyResult::InvalidIntegrity));
     }
 }

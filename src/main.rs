@@ -17,9 +17,11 @@ use crate::network::epa::SharedEPA;
 use crate::network::identity::NodeIdentity;
 use crate::network::persistence::{self, PersistedData};
 use crate::network::transport::{NetworkMessage, PeerList, UdpTransport};
+use crate::network::verify::{verify_epa, VerifyResult};
 use crate::state::State;
 use crate::types::EvidenceProvider;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::error::Error;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -94,6 +96,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let node = NodeIdentity::load_or_create(&identity_path, &config.node_name)?;
     println!("Node ID: {}", node.node_id);
+    println!("Public Key: {}...", &node.public_key[..16]);
 
     let persisted = persistence::load_data(&data_path)?;
     let known_peers = persistence::parse_peers(&persisted.peers);
@@ -107,6 +110,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         known_peers,
         config.max_peers,
     )));
+    // Contador de falhas por node_id (base para reputação futura)
+    let failure_counts: Arc<RwLock<HashMap<String, u32>>> = Arc::new(RwLock::new(HashMap::new()));
 
     let api_state = ApiState {
         node_id: node.node_id.clone(),
@@ -120,6 +125,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let node_clone = node.clone();
     let epas_clone = Arc::clone(&epas);
     let peers_clone = Arc::clone(&peers);
+    let failures_clone = Arc::clone(&failure_counts);
     let data_path_clone = data_path.clone();
 
     tokio::spawn(async move {
@@ -128,6 +134,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             node_clone,
             epas_clone,
             peers_clone,
+            failures_clone,
             data_path_clone,
         )
         .await;
@@ -263,11 +270,13 @@ async fn save_network_state(
     }
 }
 
+/// Listener UDP com verificação assíncrona de EPA.
 async fn run_udp_listener(
     mut transport: UdpTransport,
     node: NodeIdentity,
     epas: Arc<RwLock<Vec<SharedEPA>>>,
     peers: Arc<RwLock<PeerList>>,
+    failure_counts: Arc<RwLock<HashMap<String, u32>>>,
     data_path: PathBuf,
 ) {
     loop {
@@ -297,20 +306,78 @@ async fn run_udp_listener(
                     println!("Pong from {}", node_id);
                 }
                 NetworkMessage::EPA(epa) => {
-                    if epa.verify_integrity() {
-                        let mut epa_list = epas.write().await;
-                        epa_list.push(epa.clone());
-                        println!("Received valid EPA: {}", epa);
-                        save_network_state(&data_path, &peers, &epas).await;
-                    } else {
-                        println!("Rejected invalid EPA from {}", addr);
-                    }
+                    // Verificação assíncrona em background (tokio::spawn)
+                    let epas_clone = Arc::clone(&epas);
+                    let peers_clone = Arc::clone(&peers);
+                    let failures_clone = Arc::clone(&failure_counts);
+                    let data_path_clone = data_path.clone();
+
+                    tokio::spawn(async move {
+                        verify_and_store_epa(
+                            epa,
+                            epas_clone,
+                            peers_clone,
+                            failures_clone,
+                            data_path_clone,
+                        )
+                        .await;
+                    });
                 }
             },
             Err(e) => {
                 eprintln!("UDP error: {}", e);
             }
         }
+    }
+}
+
+/// Verifica EPA em background e armazena se válido.
+async fn verify_and_store_epa(
+    epa: SharedEPA,
+    epas: Arc<RwLock<Vec<SharedEPA>>>,
+    peers: Arc<RwLock<PeerList>>,
+    failure_counts: Arc<RwLock<HashMap<String, u32>>>,
+    data_path: PathBuf,
+) {
+    let result = verify_epa(&epa);
+
+    match result {
+        VerifyResult::Valid => {
+            let mut epa_list = epas.write().await;
+            epa_list.push(epa.clone());
+            println!("✓ Received valid EPA: {}", epa);
+            save_network_state(&data_path, &peers, &epas).await;
+        }
+        VerifyResult::InvalidIntegrity => {
+            eprintln!("✗ EPA integrity failed from {}", epa.node_id);
+            increment_failure(&failure_counts, &epa.node_id).await;
+        }
+        VerifyResult::InvalidSignature => {
+            eprintln!("✗ EPA signature failed from {}", epa.node_id);
+            increment_failure(&failure_counts, &epa.node_id).await;
+        }
+        VerifyResult::TimestampExpired => {
+            eprintln!("✗ EPA timestamp expired from {}", epa.node_id);
+            increment_failure(&failure_counts, &epa.node_id).await;
+        }
+        VerifyResult::MissingData => {
+            eprintln!("✗ EPA missing data from {}", epa.node_id);
+            increment_failure(&failure_counts, &epa.node_id).await;
+        }
+    }
+}
+
+/// Incrementa contador de falhas de um nó.
+async fn increment_failure(failure_counts: &Arc<RwLock<HashMap<String, u32>>>, node_id: &str) {
+    let mut counts = failure_counts.write().await;
+    let count = counts.entry(node_id.to_string()).or_insert(0);
+    *count += 1;
+
+    if *count >= 10 {
+        eprintln!(
+            "⚠ Node {} has {} failures — consider banning",
+            node_id, count
+        );
     }
 }
 

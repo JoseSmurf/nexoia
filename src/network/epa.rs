@@ -1,13 +1,20 @@
 use crate::hash::canonical_hash;
-use crate::network::identity::NodeIdentity;
+use crate::network::identity::{verify_signature, NodeIdentity};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+/// Janela de validade do timestamp: 5 minutos.
+const TIMESTAMP_MAX_AGE_SECS: i64 = 300;
+
+/// EPA compartilhável na rede P2P.
+/// Inclui assinatura Ed25519 real e timestamp para prevenir replay attacks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharedEPA {
     pub epa_id: String,
     pub node_id: String,
-    pub node_signature: String,
+    pub public_key: String,
+    pub ed25519_signature: Vec<u8>,
     pub state_hash: String,
     pub evidence_hash: String,
     pub decision_hash: String,
@@ -16,7 +23,32 @@ pub struct SharedEPA {
     pub integrity_hash: String,
 }
 
+/// Resultado da verificação de EPA.
+#[derive(Debug, Clone, PartialEq)]
+pub enum VerifyError {
+    IntegrityFailed,
+    SignatureFailed,
+    TimestampExpired,
+    TimestampInvalid,
+    MissingPublicKey,
+}
+
+impl fmt::Display for VerifyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VerifyError::IntegrityFailed => write!(f, "integrity hash mismatch"),
+            VerifyError::SignatureFailed => write!(f, "Ed25519 signature invalid"),
+            VerifyError::TimestampExpired => write!(f, "timestamp older than 5 minutes"),
+            VerifyError::TimestampInvalid => write!(f, "timestamp parse error"),
+            VerifyError::MissingPublicKey => write!(f, "public key not provided"),
+        }
+    }
+}
+
+impl std::error::Error for VerifyError {}
+
 impl SharedEPA {
+    /// Cria EPA com assinatura Ed25519.
     pub fn create(
         node: &NodeIdentity,
         state_json: &str,
@@ -34,21 +66,25 @@ impl SharedEPA {
             node.node_id, state_hash, evidence_hash, decision_hash, manifest_hash
         );
         let integrity_hash = canonical_hash(&content);
+
+        // Assina o integrity_hash com Ed25519
         let signature = node.sign(&integrity_hash);
 
         Self {
             epa_id: integrity_hash[..16].to_string(),
             node_id: node.node_id.clone(),
-            node_signature: signature,
+            public_key: node.public_key.clone(),
+            ed25519_signature: signature,
             state_hash,
             evidence_hash,
             decision_hash,
             manifest_hash,
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: Utc::now().to_rfc3339(),
             integrity_hash,
         }
     }
 
+    /// Verifica integridade do hash (sem assinatura).
     pub fn verify_integrity(&self) -> bool {
         let content = format!(
             "{}:{}:{}:{}:{}",
@@ -62,9 +98,49 @@ impl SharedEPA {
         self.integrity_hash == expected
     }
 
-    pub fn verify_signature(&self, public_key: &str) -> bool {
-        let expected_signature = canonical_hash(&format!("{}:{}", public_key, self.integrity_hash));
-        self.node_signature == expected_signature
+    /// Verifica assinatura Ed25519 completa.
+    pub fn verify_signature(&self) -> Result<(), VerifyError> {
+        if self.public_key.is_empty() {
+            return Err(VerifyError::MissingPublicKey);
+        }
+
+        let sig_valid = verify_signature(
+            &self.public_key,
+            self.integrity_hash.as_bytes(),
+            &self.ed25519_signature,
+        )
+        .unwrap_or(false);
+
+        if !sig_valid {
+            return Err(VerifyError::SignatureFailed);
+        }
+
+        Ok(())
+    }
+
+    /// Verifica se o timestamp não está muito antigo (replay protection).
+    pub fn verify_timestamp(&self) -> Result<(), VerifyError> {
+        let ts: DateTime<Utc> = self
+            .timestamp
+            .parse()
+            .map_err(|_| VerifyError::TimestampInvalid)?;
+
+        let age = Utc::now() - ts;
+        if age.num_seconds() > TIMESTAMP_MAX_AGE_SECS {
+            return Err(VerifyError::TimestampExpired);
+        }
+
+        Ok(())
+    }
+
+    /// Verificação completa: integridade + assinatura + timestamp.
+    pub fn verify_full(&self) -> Result<(), VerifyError> {
+        if !self.verify_integrity() {
+            return Err(VerifyError::IntegrityFailed);
+        }
+        self.verify_signature()?;
+        self.verify_timestamp()?;
+        Ok(())
     }
 }
 
@@ -94,33 +170,47 @@ mod tests {
     }
 
     #[test]
-    fn create_and_verify() {
+    fn create_and_verify_full() {
         let node = NodeIdentity::generate("test_node");
         let (state, evidence, decision, manifest) = sample_data();
 
         let epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest);
-        assert!(epa.verify_integrity());
-        assert!(epa.verify_signature(&node.public_key));
+        assert!(epa.verify_full().is_ok());
     }
 
     #[test]
-    fn tampered_epa_fails_verification() {
+    fn tampered_epa_fails_integrity() {
         let node = NodeIdentity::generate("test_node");
         let (state, evidence, decision, manifest) = sample_data();
 
         let mut epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest);
         epa.state_hash = "tampered".to_string();
 
-        assert!(!epa.verify_integrity());
+        assert_eq!(epa.verify_full(), Err(VerifyError::IntegrityFailed));
     }
 
     #[test]
-    fn wrong_key_fails_signature() {
+    fn wrong_signature_fails() {
         let node = NodeIdentity::generate("test_node");
         let wrong_node = NodeIdentity::generate("wrong_node");
         let (state, evidence, decision, manifest) = sample_data();
 
-        let epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest);
-        assert!(!epa.verify_signature(&wrong_node.public_key));
+        let mut epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest);
+        // Re-assina com chave errada
+        epa.ed25519_signature = wrong_node.sign(&epa.integrity_hash);
+
+        assert_eq!(epa.verify_full(), Err(VerifyError::SignatureFailed));
+    }
+
+    #[test]
+    fn expired_timestamp_fails() {
+        let node = NodeIdentity::generate("test_node");
+        let (state, evidence, decision, manifest) = sample_data();
+
+        let mut epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest);
+        // Timestamp de 10 minutos atrás
+        epa.timestamp = (Utc::now() - chrono::Duration::minutes(10)).to_rfc3339();
+
+        assert_eq!(epa.verify_full(), Err(VerifyError::TimestampExpired));
     }
 }

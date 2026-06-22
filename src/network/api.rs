@@ -1,5 +1,5 @@
 use crate::network::epa::SharedEPA;
-use crate::network::verify::verify_epa;
+use crate::network::verify::{verify_epa, VerifyResult};
 use axum::{
     extract::{Json, State},
     http::StatusCode,
@@ -28,14 +28,6 @@ pub struct ApiResponse {
 pub struct NodeListResponse {
     pub node_id: String,
     pub epa_count: usize,
-}
-
-#[derive(Deserialize)]
-pub struct VerifyRequest {
-    pub state_json: Option<String>,
-    pub evidence_jsonl: Option<String>,
-    pub decisions_jsonl: Option<String>,
-    pub manifest_json: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -80,21 +72,19 @@ async fn receive_epa(
     State(state): State<ApiState>,
     Json(epa): Json<SharedEPA>,
 ) -> Result<Json<ApiResponse>, StatusCode> {
-    if !epa.verify_integrity() {
-        return Err(StatusCode::BAD_REQUEST);
+    let result = verify_epa(&epa);
+
+    match result {
+        VerifyResult::Valid => {
+            let mut epas = state.epas.write().await;
+            epas.push(epa);
+            Ok(Json(ApiResponse {
+                status: "accepted".to_string(),
+                message: "EPA received and verified".to_string(),
+            }))
+        }
+        _ => Err(StatusCode::UNAUTHORIZED),
     }
-
-    if !epa.verify_signature(&state.public_key) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
-    let mut epas = state.epas.write().await;
-    epas.push(epa);
-
-    Ok(Json(ApiResponse {
-        status: "accepted".to_string(),
-        message: "EPA received and verified".to_string(),
-    }))
 }
 
 async fn list_epas(State(state): State<ApiState>) -> Json<Vec<SharedEPA>> {
@@ -105,7 +95,6 @@ async fn list_epas(State(state): State<ApiState>) -> Json<Vec<SharedEPA>> {
 async fn verify_epa_endpoint(
     State(state): State<ApiState>,
     axum::extract::Path(epa_id): axum::extract::Path<String>,
-    Json(req): Json<VerifyRequest>,
 ) -> Result<Json<VerifyResponse>, StatusCode> {
     let epas = state.epas.read().await;
     let epa = epas
@@ -113,14 +102,7 @@ async fn verify_epa_endpoint(
         .find(|e| e.epa_id == epa_id)
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let result = verify_epa(
-        epa,
-        req.state_json.as_deref(),
-        req.evidence_jsonl.as_deref(),
-        req.decisions_jsonl.as_deref(),
-        req.manifest_json.as_deref(),
-        Some(&state.public_key),
-    );
+    let result = verify_epa(epa);
 
     Ok(Json(VerifyResponse {
         result: result.to_string(),

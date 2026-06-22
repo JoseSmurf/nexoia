@@ -2,7 +2,6 @@ use crate::network::epa::SharedEPA;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NetworkMessage {
@@ -37,6 +36,19 @@ impl UdpTransport {
         Ok(())
     }
 
+    pub async fn broadcast(
+        &self,
+        msg: &NetworkMessage,
+        broadcast_addr: SocketAddr,
+    ) -> Result<(), std::io::Error> {
+        let data = serde_json::to_vec(msg)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        self.socket.set_broadcast(true)?;
+        self.socket.send_to(&data, broadcast_addr).await?;
+        self.socket.set_broadcast(false)?;
+        Ok(())
+    }
+
     pub async fn recv(&mut self) -> Result<(NetworkMessage, SocketAddr), std::io::Error> {
         let (len, addr) = self.socket.recv_from(&mut self.recv_buffer).await?;
         let msg: NetworkMessage = serde_json::from_slice(&self.recv_buffer[..len])
@@ -60,6 +72,14 @@ impl PeerList {
             peers: Vec::new(),
             max_peers,
         }
+    }
+
+    pub fn from_addrs(addrs: Vec<SocketAddr>, max_peers: usize) -> Self {
+        let mut list = Self::new(max_peers);
+        for addr in addrs {
+            list.add(addr);
+        }
+        list
     }
 
     pub fn add(&mut self, addr: SocketAddr) -> bool {

@@ -1,6 +1,7 @@
 use crate::hash::canonical_hash;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeIdentity {
@@ -21,6 +22,28 @@ impl NodeIdentity {
             public_key,
             created_at: timestamp,
         }
+    }
+
+    pub fn load_or_create(path: &Path, name: &str) -> Result<Self, std::io::Error> {
+        if path.exists() {
+            let data = std::fs::read_to_string(path)?;
+            let identity: Self = serde_json::from_str(&data)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            Ok(identity)
+        } else {
+            let identity = Self::generate(name);
+            identity.save(path)?;
+            Ok(identity)
+        }
+    }
+
+    pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let data = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, data)
     }
 
     pub fn sign(&self, data: &str) -> String {
@@ -66,5 +89,17 @@ mod tests {
         let b = NodeIdentity::generate("same_node");
         assert_ne!(a.node_id, b.node_id);
         assert_ne!(a.public_key, b.public_key);
+    }
+
+    #[test]
+    fn load_or_create_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity.json");
+
+        let a = NodeIdentity::load_or_create(&path, "persist_test").unwrap();
+        let b = NodeIdentity::load_or_create(&path, "persist_test").unwrap();
+
+        assert_eq!(a.node_id, b.node_id);
+        assert_eq!(a.public_key, b.public_key);
     }
 }

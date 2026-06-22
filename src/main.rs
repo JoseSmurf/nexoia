@@ -15,15 +15,17 @@ use crate::hash::canonical_hash;
 use crate::network::api::{self, ApiState};
 use crate::network::epa::SharedEPA;
 use crate::network::identity::NodeIdentity;
+use crate::network::persistence::{self, PersistedData};
 use crate::network::transport::{NetworkMessage, PeerList, UdpTransport};
 use crate::state::State;
 use crate::types::EvidenceProvider;
 use serde::Serialize;
 use std::error::Error;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize)]
@@ -44,23 +46,67 @@ struct Manifest {
     artifacts: Vec<ArtifactSummary>,
 }
 
+struct Config {
+    data_dir: PathBuf,
+    api_port: u16,
+    udp_port: u16,
+    broadcast_port: u16,
+    max_peers: usize,
+    node_name: String,
+}
+
+impl Config {
+    fn from_env() -> Self {
+        let data_dir = std::env::var("NEXOIA_DATA_DIR")
+            .unwrap_or_else(|_| ".nexoia".to_string())
+            .into();
+
+        Self {
+            data_dir,
+            api_port: std::env::var("NEXOIA_API_PORT")
+                .unwrap_or_else(|_| "3000".to_string())
+                .parse()
+                .unwrap_or(3000),
+            udp_port: std::env::var("NEXOIA_UDP_PORT")
+                .unwrap_or_else(|_| "9000".to_string())
+                .parse()
+                .unwrap_or(9000),
+            broadcast_port: std::env::var("NEXOIA_BROADCAST_PORT")
+                .unwrap_or_else(|_| "9001".to_string())
+                .parse()
+                .unwrap_or(9001),
+            max_peers: std::env::var("NEXOIA_MAX_PEERS")
+                .unwrap_or_else(|_| "10".to_string())
+                .parse()
+                .unwrap_or(10),
+            node_name: std::env::var("NEXOIA_NODE_NAME")
+                .unwrap_or_else(|_| "nexoia_node".to_string()),
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let node = NodeIdentity::generate("nexoia_node");
+    let config = Config::from_env();
+
+    let identity_path = config.data_dir.join("identity.json");
+    let data_path = config.data_dir.join("network.json");
+
+    let node = NodeIdentity::load_or_create(&identity_path, &config.node_name)?;
     println!("Node ID: {}", node.node_id);
 
-    let api_port: u16 = std::env::var("NEXOIA_API_PORT")
-        .unwrap_or_else(|_| "3000".to_string())
-        .parse()?;
-    let udp_port: u16 = std::env::var("NEXOIA_UDP_PORT")
-        .unwrap_or_else(|_| "9000".to_string())
-        .parse()?;
+    let persisted = persistence::load_data(&data_path)?;
+    let known_peers = persistence::parse_peers(&persisted.peers);
 
-    let api_addr: SocketAddr = ([127, 0, 0, 1], api_port).into();
-    let udp_addr: SocketAddr = ([127, 0, 0, 1], udp_port).into();
+    let api_addr: SocketAddr = ([127, 0, 0, 1], config.api_port).into();
+    let udp_addr: SocketAddr = ([127, 0, 0, 1], config.udp_port).into();
+    let broadcast_addr: SocketAddr = ([255, 255, 255, 255], config.broadcast_port).into();
 
-    let epas: Arc<RwLock<Vec<SharedEPA>>> = Arc::new(RwLock::new(Vec::new()));
-    let peers: Arc<RwLock<PeerList>> = Arc::new(RwLock::new(PeerList::new(10)));
+    let epas: Arc<RwLock<Vec<SharedEPA>>> = Arc::new(RwLock::new(persisted.epas));
+    let peers: Arc<RwLock<PeerList>> = Arc::new(RwLock::new(PeerList::from_addrs(
+        known_peers,
+        config.max_peers,
+    )));
 
     let api_state = ApiState {
         node_id: node.node_id.clone(),
@@ -74,12 +120,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let node_clone = node.clone();
     let epas_clone = Arc::clone(&epas);
     let peers_clone = Arc::clone(&peers);
+    let data_path_clone = data_path.clone();
 
     tokio::spawn(async move {
-        run_udp_listener(udp_socket, node_clone, epas_clone, peers_clone).await;
+        run_udp_listener(
+            udp_socket,
+            node_clone,
+            epas_clone,
+            peers_clone,
+            data_path_clone,
+        )
+        .await;
     });
 
-    let node_for_api = node.clone();
     tokio::spawn(async move {
         if let Err(e) = api::create_api(api_state, api_addr).await {
             eprintln!("API error: {}", e);
@@ -87,7 +140,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
     println!("API listening on http://{}", api_addr);
 
-    run_pipeline(&node, &peers).await?;
+    let node_discover = node.clone();
+    let peers_discover = Arc::clone(&peers);
+    tokio::spawn(async move {
+        run_discovery(
+            node_discover,
+            udp_addr.port(),
+            broadcast_addr,
+            peers_discover,
+        )
+        .await;
+    });
+
+    run_pipeline(&node, &peers, &epas, &data_path).await?;
 
     println!("\nNode running. Press Ctrl+C to stop.");
     tokio::signal::ctrl_c().await?;
@@ -98,6 +163,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn run_pipeline(
     node: &NodeIdentity,
     peers: &Arc<RwLock<PeerList>>,
+    epas: &Arc<RwLock<Vec<SharedEPA>>>,
+    data_path: &Path,
 ) -> Result<(), Box<dyn Error>> {
     let limiter = defense::RateLimiter::new(100, Duration::from_secs(60));
     let engine = ai::MockEngine::new(0.70);
@@ -161,6 +228,13 @@ async fn run_pipeline(
 
     println!("\nEPA created: {}", epa);
 
+    {
+        let mut epa_list = epas.write().await;
+        epa_list.push(epa.clone());
+    }
+
+    save_network_state(data_path, peers, epas).await;
+
     let peer_list = peers.read().await;
     if !peer_list.is_empty() {
         println!("Sharing EPA with {} peers...", peer_list.len());
@@ -171,11 +245,30 @@ async fn run_pipeline(
     Ok(())
 }
 
+async fn save_network_state(
+    data_path: &Path,
+    peers: &Arc<RwLock<PeerList>>,
+    epas: &Arc<RwLock<Vec<SharedEPA>>>,
+) {
+    let peer_list = peers.read().await;
+    let epa_list = epas.read().await;
+
+    let data = PersistedData {
+        peers: persistence::format_peers(peer_list.peers()),
+        epas: epa_list.clone(),
+    };
+
+    if let Err(e) = persistence::save_data(data_path, &data) {
+        eprintln!("Failed to save network state: {}", e);
+    }
+}
+
 async fn run_udp_listener(
     mut transport: UdpTransport,
     node: NodeIdentity,
     epas: Arc<RwLock<Vec<SharedEPA>>>,
     peers: Arc<RwLock<PeerList>>,
+    data_path: PathBuf,
 ) {
     loop {
         match transport.recv().await {
@@ -189,6 +282,7 @@ async fn run_udp_listener(
                                 node_id: node.node_id.clone(),
                             };
                             let _ = transport.send(&pong, peer_addr).await;
+                            save_network_state(&data_path, &peers, &epas).await;
                         }
                     }
                 }
@@ -207,6 +301,7 @@ async fn run_udp_listener(
                         let mut epa_list = epas.write().await;
                         epa_list.push(epa.clone());
                         println!("Received valid EPA: {}", epa);
+                        save_network_state(&data_path, &peers, &epas).await;
                     } else {
                         println!("Rejected invalid EPA from {}", addr);
                     }
@@ -215,6 +310,28 @@ async fn run_udp_listener(
             Err(e) => {
                 eprintln!("UDP error: {}", e);
             }
+        }
+    }
+}
+
+async fn run_discovery(
+    node: NodeIdentity,
+    udp_port: u16,
+    broadcast_addr: SocketAddr,
+    peers: Arc<RwLock<PeerList>>,
+) {
+    let discovery_socket = UdpSocket::bind("0.0.0.0:0").await.ok();
+    if let Some(socket) = discovery_socket {
+        let _ = socket.set_broadcast(true);
+        loop {
+            let msg = NetworkMessage::Discover {
+                node_id: node.node_id.clone(),
+                address: format!("127.0.0.1:{}", udp_port),
+            };
+            if let Ok(data) = serde_json::to_vec(&msg) {
+                let _ = socket.send_to(&data, broadcast_addr).await;
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
         }
     }
 }

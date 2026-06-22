@@ -1,5 +1,7 @@
 use crate::hash::canonical_hash;
+use crate::network::crypto::{self, KeyPair};
 use crate::network::identity::{verify_signature, NodeIdentity};
+use chacha20poly1305::ChaCha20Poly1305;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -10,6 +12,7 @@ const TIMESTAMP_MAX_FUTURE_SECS: i64 = 120;
 
 /// EPA compartilhável na rede P2P.
 /// Inclui assinatura Ed25519 real e timestamp para prevenir replay attacks.
+/// Suporta payload encriptado opcional para privacidade.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharedEPA {
     pub epa_id: String,
@@ -22,6 +25,8 @@ pub struct SharedEPA {
     pub manifest_hash: String,
     pub timestamp: String,
     pub integrity_hash: String,
+    /// Payload encriptado (opcional). Formato: nonce (12 bytes) + ciphertext.
+    pub encrypted_payload: Option<Vec<u8>>,
 }
 
 /// Resultado da verificação de EPA.
@@ -53,7 +58,7 @@ impl fmt::Display for VerifyError {
 impl std::error::Error for VerifyError {}
 
 impl SharedEPA {
-    /// Cria EPA com assinatura Ed25519.
+    /// Cria EPA com assinatura Ed25519 (sem encriptação).
     pub fn create(
         node: &NodeIdentity,
         state_json: &str,
@@ -86,7 +91,56 @@ impl SharedEPA {
             manifest_hash,
             timestamp: Utc::now().to_rfc3339(),
             integrity_hash,
+            encrypted_payload: None,
         }
+    }
+
+    /// Cria EPA com payload encriptado para um destinatário específico.
+    pub fn create_encrypted(
+        node: &NodeIdentity,
+        state_json: &str,
+        evidence_jsonl: &str,
+        decisions_jsonl: &str,
+        manifest_json: &str,
+        recipient_public_key: &[u8; 32],
+    ) -> Result<Self, String> {
+        let mut epa = Self::create(
+            node,
+            state_json,
+            evidence_jsonl,
+            decisions_jsonl,
+            manifest_json,
+        );
+
+        // Encripta o conteúdo sensível
+        let sensitive_data = format!(
+            "{}|{}|{}|{}",
+            state_json, evidence_jsonl, decisions_jsonl, manifest_json
+        );
+
+        let keypair = KeyPair::generate();
+        let cipher = keypair.derive_cipher(recipient_public_key)?;
+        let encrypted = crypto::encrypt(sensitive_data.as_bytes(), &cipher)?;
+
+        epa.encrypted_payload = Some(encrypted);
+        Ok(epa)
+    }
+
+    /// Decripta o payload usando chave privada do destinatário.
+    pub fn decrypt_payload(
+        &self,
+        recipient_keypair: &KeyPair,
+        sender_public_key: &[u8; 32],
+    ) -> Result<String, String> {
+        let encrypted = self
+            .encrypted_payload
+            .as_ref()
+            .ok_or("No encrypted payload")?;
+
+        let cipher = recipient_keypair.derive_cipher(sender_public_key)?;
+        let decrypted = crypto::decrypt(encrypted, &cipher)?;
+
+        String::from_utf8(decrypted).map_err(|e| format!("Invalid UTF-8: {}", e))
     }
 
     /// Verifica integridade do hash (sem assinatura).

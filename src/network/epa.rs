@@ -4,8 +4,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Janela de validade do timestamp: 5 minutos.
+/// Janela de validade do timestamp: 5 minutos para trás e 2 minutos para frente.
 const TIMESTAMP_MAX_AGE_SECS: i64 = 300;
+const TIMESTAMP_MAX_FUTURE_SECS: i64 = 120;
 
 /// EPA compartilhável na rede P2P.
 /// Inclui assinatura Ed25519 real e timestamp para prevenir replay attacks.
@@ -29,6 +30,7 @@ pub enum VerifyError {
     IntegrityFailed,
     SignatureFailed,
     TimestampExpired,
+    TimestampTooNew,
     TimestampInvalid,
     MissingPublicKey,
 }
@@ -39,6 +41,9 @@ impl fmt::Display for VerifyError {
             VerifyError::IntegrityFailed => write!(f, "integrity hash mismatch"),
             VerifyError::SignatureFailed => write!(f, "Ed25519 signature invalid"),
             VerifyError::TimestampExpired => write!(f, "timestamp older than 5 minutes"),
+            VerifyError::TimestampTooNew => {
+                write!(f, "timestamp more than 2 minutes in the future")
+            }
             VerifyError::TimestampInvalid => write!(f, "timestamp parse error"),
             VerifyError::MissingPublicKey => write!(f, "public key not provided"),
         }
@@ -118,16 +123,25 @@ impl SharedEPA {
         Ok(())
     }
 
-    /// Verifica se o timestamp não está muito antigo (replay protection).
+    /// Verifica se o timestamp está dentro da janela aceitável.
+    /// Rejeita timestamps muito antigos (>5 min) ou muito futuros (>2 min).
     pub fn verify_timestamp(&self) -> Result<(), VerifyError> {
         let ts: DateTime<Utc> = self
             .timestamp
             .parse()
             .map_err(|_| VerifyError::TimestampInvalid)?;
 
-        let age = Utc::now() - ts;
+        let now = Utc::now();
+        let age = now - ts;
+
+        // Rejeita se muito antigo (replay attack)
         if age.num_seconds() > TIMESTAMP_MAX_AGE_SECS {
             return Err(VerifyError::TimestampExpired);
+        }
+
+        // Rejeita se muito no futuro (clock skew attack)
+        if age.num_seconds() < -TIMESTAMP_MAX_FUTURE_SECS {
+            return Err(VerifyError::TimestampTooNew);
         }
 
         Ok(())

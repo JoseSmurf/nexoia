@@ -479,6 +479,10 @@ async fn verify_and_store_epa(
             eprintln!("✗ EPA timestamp expired from {}", epa.node_id);
             increment_failure(&reputation, &epa.node_id).await;
         }
+        VerifyResult::TimestampTooNew => {
+            eprintln!("✗ EPA timestamp too far in the future from {}", epa.node_id);
+            increment_failure(&reputation, &epa.node_id).await;
+        }
         VerifyResult::MissingData => {
             eprintln!("✗ EPA missing data from {}", epa.node_id);
             increment_failure(&reputation, &epa.node_id).await;

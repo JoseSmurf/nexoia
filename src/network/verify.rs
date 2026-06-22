@@ -9,6 +9,7 @@ pub enum VerifyResult {
     InvalidIntegrity,
     InvalidSignature,
     TimestampExpired,
+    TimestampTooNew,
     MissingData,
 }
 
@@ -19,6 +20,7 @@ impl fmt::Display for VerifyResult {
             VerifyResult::InvalidIntegrity => write!(f, "INVALID_INTEGRITY"),
             VerifyResult::InvalidSignature => write!(f, "INVALID_SIGNATURE"),
             VerifyResult::TimestampExpired => write!(f, "TIMESTAMP_EXPIRED"),
+            VerifyResult::TimestampTooNew => write!(f, "TIMESTAMP_TOO_NEW"),
             VerifyResult::MissingData => write!(f, "MISSING_DATA"),
         }
     }
@@ -31,6 +33,7 @@ pub fn verify_epa(epa: &SharedEPA) -> VerifyResult {
         Err(VerifyError::IntegrityFailed) => VerifyResult::InvalidIntegrity,
         Err(VerifyError::SignatureFailed) => VerifyResult::InvalidSignature,
         Err(VerifyError::TimestampExpired) => VerifyResult::TimestampExpired,
+        Err(VerifyError::TimestampTooNew) => VerifyResult::TimestampTooNew,
         Err(VerifyError::TimestampInvalid) => VerifyResult::InvalidIntegrity,
         Err(VerifyError::MissingPublicKey) => VerifyResult::InvalidSignature,
     }

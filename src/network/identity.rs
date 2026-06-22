@@ -62,6 +62,7 @@ impl NodeIdentity {
     }
 
     /// Salva identidade (incluindo chave privada) em arquivo.
+    /// Força permissões 0600 no Unix (somente owner pode ler/escrever).
     pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -74,7 +75,17 @@ impl NodeIdentity {
         };
         let data = serde_json::to_string_pretty(&saved)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        std::fs::write(path, data)
+        std::fs::write(path, data)?;
+
+        // Força permissões 0600 no Unix (owner read/write only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(path, perms)?;
+        }
+
+        Ok(())
     }
 
     /// Assina dados com a chave privada Ed25519.

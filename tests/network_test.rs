@@ -75,8 +75,8 @@ fn node_identity_persists() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("identity.json");
 
-    let a = NodeIdentity::load_or_create(&path, "persist_test").unwrap();
-    let b = NodeIdentity::load_or_create(&path, "persist_test").unwrap();
+    let a = NodeIdentity::load_or_create(&path, "persist_test", None).unwrap();
+    let b = NodeIdentity::load_or_create(&path, "persist_test", None).unwrap();
 
     assert_eq!(a.node_id, b.node_id);
     assert_eq!(a.public_key, b.public_key);

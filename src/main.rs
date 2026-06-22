@@ -101,7 +101,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let identity_path = config.data_dir.join("identity.json");
     let data_path = config.data_dir.join("network.json");
 
-    let node = NodeIdentity::load_or_create(&identity_path, &config.node_name)?;
+    // Lê passphrase do ambiente (opcional)
+    let passphrase = std::env::var("NEXOIA_PASSPHRASE")
+        .ok()
+        .map(|p| p.into_bytes());
+
+    let node =
+        NodeIdentity::load_or_create(&identity_path, &config.node_name, passphrase.as_deref())?;
     println!("Node ID: {}", node.node_id);
     println!("Public Key: {}...", &node.public_key[..16]);
 
@@ -124,9 +130,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         eprintln!("Warning: Could not load reputation: {}", e);
     });
     let reputation: Arc<RwLock<ReputationStore>> = Arc::new(RwLock::new(reputation_store));
-    // Lista de peers autenticados via handshake
-    let trusted_peers: Arc<RwLock<TrustedPeerList>> =
-        Arc::new(RwLock::new(TrustedPeerList::new(config.max_peers)));
+    // Lista de peers autenticados via handshake (carrega do disco)
+    let persisted_trusted =
+        persistence::persisted_to_trusted(&persisted.trusted_peers, config.max_peers);
+    let trusted_peers: Arc<RwLock<TrustedPeerList>> = Arc::new(RwLock::new(persisted_trusted));
+    if !persisted.trusted_peers.is_empty() {
+        println!(
+            "Loaded {} trusted peers from disk",
+            persisted.trusted_peers.len()
+        );
+    }
     // Estado dos peers para heartbeat
     let peer_states: Arc<RwLock<HashMap<SocketAddr, PeerState>>> =
         Arc::new(RwLock::new(HashMap::new()));
@@ -209,7 +222,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await;
     });
 
-    run_pipeline(&node, &peers, &epas, &data_path).await?;
+    run_pipeline(&node, &peers, &epas, &trusted_peers, &data_path).await?;
 
     println!("\nNode running. Press Ctrl+C to stop.");
     tokio::signal::ctrl_c().await?;
@@ -221,6 +234,7 @@ async fn run_pipeline(
     node: &NodeIdentity,
     peers: &Arc<RwLock<PeerList>>,
     epas: &Arc<RwLock<Vec<SharedEPA>>>,
+    trusted_peers: &Arc<RwLock<TrustedPeerList>>,
     data_path: &Path,
 ) -> Result<(), Box<dyn Error>> {
     let limiter = defense::RateLimiter::new(100, Duration::from_secs(60));
@@ -290,7 +304,7 @@ async fn run_pipeline(
         epa_list.push(epa.clone());
     }
 
-    save_network_state(data_path, peers, epas).await;
+    save_network_state(data_path, peers, epas, trusted_peers).await;
 
     let peer_list = peers.read().await;
     if !peer_list.is_empty() {
@@ -306,13 +320,16 @@ async fn save_network_state(
     data_path: &Path,
     peers: &Arc<RwLock<PeerList>>,
     epas: &Arc<RwLock<Vec<SharedEPA>>>,
+    trusted_peers: &Arc<RwLock<TrustedPeerList>>,
 ) {
     let peer_list = peers.read().await;
     let epa_list = epas.read().await;
+    let trusted_list = trusted_peers.read().await;
 
     let data = PersistedData {
         peers: persistence::format_peers(peer_list.peers()),
         epas: epa_list.clone(),
+        trusted_peers: persistence::trusted_to_persisted(&trusted_list),
     };
 
     if let Err(e) = persistence::save_data(data_path, &data) {
@@ -433,7 +450,7 @@ async fn run_udp_listener(
                                 node_id: node.node_id.clone(),
                             };
                             let _ = transport.send(&pong, peer_addr).await;
-                            save_network_state(&data_path, &peers, &epas).await;
+                            save_network_state(&data_path, &peers, &epas, &trusted_peers).await;
                         }
                     }
                 }
@@ -512,6 +529,7 @@ async fn run_udp_listener(
                     // Verificação assíncrona em background
                     let epas_clone = Arc::clone(&epas);
                     let peers_clone = Arc::clone(&peers);
+                    let trusted_clone = Arc::clone(&trusted_peers);
                     let reputation_clone = Arc::clone(&reputation);
                     let data_path_clone = data_path.clone();
 
@@ -520,6 +538,7 @@ async fn run_udp_listener(
                             epa,
                             epas_clone,
                             peers_clone,
+                            trusted_clone,
                             reputation_clone,
                             data_path_clone,
                         )
@@ -539,6 +558,7 @@ async fn verify_and_store_epa(
     epa: SharedEPA,
     epas: Arc<RwLock<Vec<SharedEPA>>>,
     peers: Arc<RwLock<PeerList>>,
+    trusted_peers: Arc<RwLock<TrustedPeerList>>,
     reputation: Arc<RwLock<ReputationStore>>,
     data_path: PathBuf,
 ) {
@@ -556,7 +576,7 @@ async fn verify_and_store_epa(
             let mut epa_list = epas.write().await;
             epa_list.push(epa.clone());
             println!("✓ Received valid EPA: {}", epa);
-            save_network_state(&data_path, &peers, &epas).await;
+            save_network_state(&data_path, &peers, &epas, &trusted_peers).await;
         }
         VerifyResult::InvalidIntegrity => {
             eprintln!("✗ EPA integrity failed from {}", epa.node_id);

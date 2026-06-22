@@ -1,5 +1,6 @@
 use crate::hash::canonical_hash;
 use crate::network::crypto::KeyPair;
+use crate::network::crypto_key;
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -44,19 +45,60 @@ impl NodeIdentity {
     }
 
     /// Carrega identidade de arquivo ou cria nova.
-    pub fn load_or_create(path: &Path, name: &str) -> Result<Self, std::io::Error> {
+    /// Se passphrase for fornecida, descriptografa as chaves privadas.
+    pub fn load_or_create(
+        path: &Path,
+        name: &str,
+        passphrase: Option<&[u8]>,
+    ) -> Result<Self, std::io::Error> {
         if path.exists() {
             let data = std::fs::read_to_string(path)?;
             let saved: SavedIdentity = serde_json::from_str(&data)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-            let key_bytes: [u8; 32] = saved.secret_key_bytes.try_into().map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid key length")
-            })?;
-            let signing_key = SigningKey::from_bytes(&key_bytes);
+            // Descriptografa ou usa texto puro
+            let signing_key = if let Some(encrypted) = &saved.encrypted_secret_key {
+                let pass = passphrase.ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Passphrase required to decrypt identity",
+                    )
+                })?;
+                let decrypted = crypto_key::decrypt_with_passphrase(encrypted, pass)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let key_bytes: [u8; 32] = decrypted.try_into().map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "invalid key length after decrypt",
+                    )
+                })?;
+                SigningKey::from_bytes(&key_bytes)
+            } else {
+                // Texto puro (compatibilidade)
+                let key_bytes: [u8; 32] = saved.secret_key_bytes.try_into().map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid key length")
+                })?;
+                SigningKey::from_bytes(&key_bytes)
+            };
 
             // Carrega par de chaves X25519
-            let encryption_keypair = if !saved.encryption_secret_bytes.is_empty() {
+            let encryption_keypair = if let Some(encrypted) = &saved.encrypted_encryption_key {
+                let pass = passphrase.ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Passphrase required to decrypt encryption key",
+                    )
+                })?;
+                let decrypted = crypto_key::decrypt_with_passphrase(encrypted, pass)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let secret_bytes: [u8; 32] = decrypted.try_into().map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "invalid encryption key after decrypt",
+                    )
+                })?;
+                KeyPair::from_secret(secret_bytes)
+            } else if !saved.encryption_secret_bytes.is_empty() {
                 let secret_bytes: [u8; 32] =
                     saved.encryption_secret_bytes.try_into().map_err(|_| {
                         std::io::Error::new(
@@ -66,7 +108,6 @@ impl NodeIdentity {
                     })?;
                 KeyPair::from_secret(secret_bytes)
             } else {
-                // Compatibilidade com identidades antigas
                 KeyPair::generate()
             };
 
@@ -79,30 +120,68 @@ impl NodeIdentity {
             })
         } else {
             let identity = Self::generate(name);
-            identity.save(path)?;
+            identity.save(path, passphrase)?;
             Ok(identity)
         }
     }
 
-    /// Salva identidade (incluindo chaves privadas) em arquivo.
-    /// Força permissões 0600 no Unix (somente owner pode ler/escrever).
-    pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
+    /// Salva identidade em arquivo.
+    /// Se passphrase for fornecida, criptografa as chaves privadas.
+    /// Força permissões 0600 no Unix.
+    pub fn save(&self, path: &Path, passphrase: Option<&[u8]>) -> Result<(), std::io::Error> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+
+        let (secret_key_bytes, encryption_secret_bytes, encrypted_secret, encrypted_encryption) =
+            if let Some(pass) = passphrase {
+                // Criptografa chaves com passphrase
+                let secret_encrypted =
+                    crypto_key::encrypt_with_passphrase(&self.signing_key.to_bytes(), pass)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+                let enc_key_encrypted = crypto_key::encrypt_with_passphrase(
+                    &self.encryption_keypair.secret_bytes(),
+                    pass,
+                )
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+                (
+                    vec![], // Texto puro vazio
+                    vec![],
+                    Some(secret_encrypted),
+                    Some(enc_key_encrypted),
+                )
+            } else {
+                // Sem passphrase — salva em texto puro com warning
+                eprintln!(
+                    "⚠ WARNING: Saving identity WITHOUT passphrase. \
+                     Set NEXOIA_PASSPHRASE to encrypt private keys."
+                );
+                (
+                    self.signing_key.to_bytes().to_vec(),
+                    self.encryption_keypair.secret_bytes().to_vec(),
+                    None,
+                    None,
+                )
+            };
+
         let saved = SavedIdentity {
             node_id: self.node_id.clone(),
             public_key: self.public_key.clone(),
             created_at: self.created_at.clone(),
-            secret_key_bytes: self.signing_key.to_bytes().to_vec(),
-            encryption_secret_bytes: self.encryption_keypair.secret_bytes().to_vec(),
+            secret_key_bytes,
+            encryption_secret_bytes,
             encryption_public_bytes: self.encryption_keypair.public_bytes().to_vec(),
+            encrypted_secret_key: encrypted_secret,
+            encrypted_encryption_key: encrypted_encryption,
         };
+
         let data = serde_json::to_string_pretty(&saved)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(path, data)?;
 
-        // Força permissões 0600 no Unix (owner read/write only)
+        // Força permissões 0600 no Unix
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -133,6 +212,8 @@ impl Serialize for NodeIdentity {
             secret_key_bytes: self.signing_key.to_bytes().to_vec(),
             encryption_secret_bytes: self.encryption_keypair.secret_bytes().to_vec(),
             encryption_public_bytes: self.encryption_keypair.public_bytes().to_vec(),
+            encrypted_secret_key: None,
+            encrypted_encryption_key: None,
         };
         saved.serialize(serializer)
     }
@@ -141,14 +222,28 @@ impl Serialize for NodeIdentity {
 impl<'de> Deserialize<'de> for NodeIdentity {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let saved = SavedIdentity::deserialize(deserializer)?;
-        let key_bytes: [u8; 32] = saved
-            .secret_key_bytes
-            .try_into()
-            .map_err(|_| serde::de::Error::custom("invalid key length"))?;
-        let signing_key = SigningKey::from_bytes(&key_bytes);
+
+        // Descriptografa ou usa texto puro
+        let signing_key = if let Some(encrypted) = &saved.encrypted_secret_key {
+            // Não podemos descriptografar sem passphrase no contexto de deserialização
+            // Retorna erro indicando que passphrase é necessária
+            return Err(serde::de::Error::custom(
+                "Encrypted identity requires passphrase. Use load_or_create() instead.",
+            ));
+        } else {
+            let key_bytes: [u8; 32] = saved
+                .secret_key_bytes
+                .try_into()
+                .map_err(|_| serde::de::Error::custom("invalid key length"))?;
+            SigningKey::from_bytes(&key_bytes)
+        };
 
         // Carrega par de chaves X25519
-        let encryption_keypair = if !saved.encryption_secret_bytes.is_empty() {
+        let encryption_keypair = if let Some(encrypted) = &saved.encrypted_encryption_key {
+            return Err(serde::de::Error::custom(
+                "Encrypted identity requires passphrase. Use load_or_create() instead.",
+            ));
+        } else if !saved.encryption_secret_bytes.is_empty() {
             let secret_bytes: [u8; 32] = saved
                 .encryption_secret_bytes
                 .try_into()
@@ -173,9 +268,13 @@ struct SavedIdentity {
     node_id: String,
     public_key: String,
     created_at: String,
+    /// Chaves em texto puro (quando não há passphrase)
     secret_key_bytes: Vec<u8>,
     encryption_secret_bytes: Vec<u8>,
     encryption_public_bytes: Vec<u8>,
+    /// Chaves criptografadas (quando há passphrase)
+    encrypted_secret_key: Option<Vec<u8>>,
+    encrypted_encryption_key: Option<Vec<u8>>,
 }
 
 impl fmt::Display for NodeIdentity {
@@ -264,10 +363,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("identity.json");
 
-        let a = NodeIdentity::load_or_create(&path, "persist_test").unwrap();
-        let b = NodeIdentity::load_or_create(&path, "persist_test").unwrap();
+        let a = NodeIdentity::load_or_create(&path, "persist_test", None).unwrap();
+        let b = NodeIdentity::load_or_create(&path, "persist_test", None).unwrap();
 
         assert_eq!(a.node_id, b.node_id);
         assert_eq!(a.public_key, b.public_key);
+    }
+
+    #[test]
+    fn load_or_create_with_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity.json");
+        let passphrase = b"test-passphrase";
+
+        // Cria identidade com passphrase
+        let a = NodeIdentity::load_or_create(&path, "passphrase_test", Some(passphrase)).unwrap();
+
+        // Carrega com mesma passphrase
+        let b = NodeIdentity::load_or_create(&path, "passphrase_test", Some(passphrase)).unwrap();
+        assert_eq!(a.node_id, b.node_id);
+        assert_eq!(a.public_key, b.public_key);
+
+        // Falha com passphrase errada
+        let c = NodeIdentity::load_or_create(&path, "passphrase_test", Some(b"wrong"));
+        assert!(c.is_err());
     }
 }

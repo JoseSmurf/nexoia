@@ -569,6 +569,45 @@ async fn run_udp_listener(
                     }
                 }
 
+                // Peer Exchange: Nó compartilha lista de peers conhecidos
+                NetworkMessage::PeerExchange {
+                    node_id,
+                    peers: peer_addrs,
+                } => {
+                    println!(
+                        "PeerExchange: {} shared {} peers",
+                        node_id,
+                        peer_addrs.len()
+                    );
+                    let mut peer_list = trusted_peers.write().await;
+                    for peer_addr_str in &peer_addrs {
+                        if let Ok(peer_addr) = peer_addr_str.parse::<SocketAddr>() {
+                            if peer_addr != addr && !peer_list.contains(&peer_addr) {
+                                let new_peer = TrustedPeer {
+                                    node_id: format!("peer_{}", peer_addr),
+                                    public_key: String::new(),
+                                    encryption_public_key: [0u8; 32],
+                                    addr: peer_addr,
+                                    authenticated_at: chrono::Utc::now(),
+                                };
+                                if peer_list.add(new_peer) {
+                                    println!("  → Added {} from peer exchange", peer_addr);
+                                    // Envia Hello para novo peer
+                                    let hello = NetworkMessage::Hello {
+                                        node_id: node.node_id.clone(),
+                                        public_key: node.public_key.clone(),
+                                        encryption_public_key: node
+                                            .encryption_keypair
+                                            .public_bytes()
+                                            .to_vec(),
+                                    };
+                                    let _ = transport.send(&hello, peer_addr).await;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // EPA: Só aceita de peers autenticados
                 NetworkMessage::EPA(mut epa) => {
                     let trusted = trusted_peers.read().await;
@@ -691,7 +730,7 @@ async fn increment_failure(reputation: &Arc<RwLock<ReputationStore>>, node_id: &
         .unwrap_or_else(|e| eprintln!("Failed to save reputation: {}", e));
 }
 
-/// Envia heartbeat periodicamente para todos os peers confiáveis.
+/// Envia heartbeat periodicamente e compartilha peers conhecidos.
 async fn run_heartbeat_sender(
     node: NodeIdentity,
     trusted_peers: Arc<RwLock<TrustedPeerList>>,
@@ -699,6 +738,7 @@ async fn run_heartbeat_sender(
     udp_addr: SocketAddr,
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(30));
+    let mut peer_exchange_counter = 0u32;
 
     loop {
         interval.tick().await;
@@ -720,6 +760,7 @@ async fn run_heartbeat_sender(
             }
         };
 
+        // Envia heartbeat para todos os peers
         let heartbeat = NetworkMessage::Heartbeat {
             node_id: node.node_id.clone(),
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -731,11 +772,32 @@ async fn run_heartbeat_sender(
             }
         }
 
+        // Peer exchange a cada 5 heartbeats (2.5 min)
+        peer_exchange_counter += 1;
+        if peer_exchange_counter >= 5 {
+            peer_exchange_counter = 0;
+            let peers_list = trusted_peers.read().await;
+            let peer_addrs: Vec<String> =
+                peers_list.addrs().iter().map(|a| a.to_string()).collect();
+            drop(peers_list);
+
+            if !peer_addrs.is_empty() {
+                let exchange = NetworkMessage::PeerExchange {
+                    node_id: node.node_id.clone(),
+                    peers: peer_addrs,
+                };
+                if let Ok(data) = serde_json::to_vec(&exchange) {
+                    for addr in &addrs {
+                        let _ = socket.send_to(&data, addr).await;
+                    }
+                }
+            }
+        }
+
         // Registra miss para peers que não responderam
         let mut states = peer_states.write().await;
         for addr in &addrs {
             if let Some(state) = states.get_mut(addr) {
-                // Se último heartbeat foi há mais de 30s, conta como miss
                 if state.is_inactive(30) {
                     state.record_miss();
                 }
@@ -746,7 +808,7 @@ async fn run_heartbeat_sender(
     }
 }
 
-/// Monitora peers inativos e os remove da TrustedPeerList.
+/// Monitora peers inativos e gerencia reconexão.
 async fn run_heartbeat_monitor(
     peer_states: Arc<RwLock<HashMap<SocketAddr, PeerState>>>,
     trusted_peers: Arc<RwLock<TrustedPeerList>>,
@@ -758,6 +820,7 @@ async fn run_heartbeat_monitor(
 
         let states = peer_states.read().await;
         let mut to_remove = Vec::new();
+        let mut to_reconnect = Vec::new();
 
         for (addr, state) in states.iter() {
             // Remove peer se inativo por mais de 5 minutos
@@ -767,6 +830,10 @@ async fn run_heartbeat_monitor(
                     addr, state.consecutive_misses
                 );
                 to_remove.push(*addr);
+            }
+            // Tenta reconectar se peer tem misses mas ainda não expirou
+            else if state.consecutive_misses >= 3 && state.should_reconnect() {
+                to_reconnect.push(*addr);
             }
             // Avisa se peer está suspeito (2+ misses)
             else if state.consecutive_misses >= 2 {
@@ -786,6 +853,20 @@ async fn run_heartbeat_monitor(
                 peers.remove(addr);
                 states.remove(addr);
                 eprintln!("✗ Peer {} removed from trusted list (inactive)", addr);
+            }
+        }
+
+        // Agenda reconexão para peers com misses
+        if !to_reconnect.is_empty() {
+            let mut states = peer_states.write().await;
+            for addr in &to_reconnect {
+                if let Some(state) = states.get_mut(addr) {
+                    state.schedule_reconnect();
+                    eprintln!(
+                        "↻ Scheduling reconnect for {} (attempt {})",
+                        addr, state.reconnect_attempts
+                    );
+                }
             }
         }
     }

@@ -29,6 +29,11 @@ pub enum NetworkMessage {
     HeartbeatAck {
         node_id: String,
     },
+    // Peer Exchange
+    PeerExchange {
+        node_id: String,
+        peers: Vec<String>,
+    },
     // Handshake
     Hello {
         node_id: String,
@@ -49,11 +54,14 @@ pub enum NetworkMessage {
     },
 }
 
-/// Estado de um peer para controle de heartbeat.
+/// Estado de um peer para controle de heartbeat e reconexão.
 #[derive(Debug, Clone)]
 pub struct PeerState {
     pub last_heartbeat: DateTime<Utc>,
     pub consecutive_misses: u32,
+    pub last_seen: DateTime<Utc>,
+    pub reconnect_attempts: u32,
+    pub next_reconnect: DateTime<Utc>,
 }
 
 impl PeerState {
@@ -61,13 +69,18 @@ impl PeerState {
         Self {
             last_heartbeat: Utc::now(),
             consecutive_misses: 0,
+            last_seen: Utc::now(),
+            reconnect_attempts: 0,
+            next_reconnect: Utc::now(),
         }
     }
 
     /// Registra heartbeat recebido.
     pub fn record_heartbeat(&mut self) {
         self.last_heartbeat = Utc::now();
+        self.last_seen = Utc::now();
         self.consecutive_misses = 0;
+        self.reconnect_attempts = 0;
     }
 
     /// Registra miss (heartbeat não recebido).
@@ -78,6 +91,18 @@ impl PeerState {
     /// Verifica se o peer está inativo (sem resposta por muito tempo).
     pub fn is_inactive(&self, timeout_secs: i64) -> bool {
         Utc::now() - self.last_heartbeat > chrono::Duration::seconds(timeout_secs)
+    }
+
+    /// Calcula próximo tempo de reconexão com backoff exponencial.
+    pub fn schedule_reconnect(&mut self) {
+        self.reconnect_attempts += 1;
+        let backoff_secs = (2u32.pow(self.reconnect_attempts.min(5)) * 5) as i64;
+        self.next_reconnect = Utc::now() + chrono::Duration::seconds(backoff_secs);
+    }
+
+    /// Verifica se é hora de tentar reconexão.
+    pub fn should_reconnect(&self) -> bool {
+        Utc::now() >= self.next_reconnect
     }
 }
 

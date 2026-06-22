@@ -40,15 +40,55 @@ Rede de auditoria descentralizada. Nós executam pipeline determinístico local 
 ## Quick Start
 
 ```bash
-# Nó 1
+# Nó 1 (escuta na porta 9000)
 cargo run
 
-# Nó 2 (outro terminal, porta diferente)
-NEXOIA_API_PORT=3001 NEXOIA_UDP_PORT=9001 cargo run
-
-# Nó 2 conectando ao Nó 1 via bootstrap
+# Nó 2 (conecta ao Nó 1 via bootstrap)
 NEXOIA_API_PORT=3001 NEXOIA_UDP_PORT=9001 \
 NEXOIA_BOOTSTRAP_PEERS=127.0.0.1:9000 cargo run
+```
+
+## Rodando Múltiplos Nós
+
+### Exemplo: 3 nós locais
+
+**Terminal 1 — Nó 1 (bootstrap):**
+```bash
+NEXOIA_API_PORT=3000 NEXOIA_UDP_PORT=9000 \
+NEXOIA_NODE_NAME=node_alpha cargo run
+```
+
+**Terminal 2 — Nó 2 (conecta ao Nó 1):**
+```bash
+NEXOIA_API_PORT=3001 NEXOIA_UDP_PORT=9001 \
+NEXOIA_BOOTSTRAP_PEERS=127.0.0.1:9000 \
+NEXOIA_NODE_NAME=node_beta cargo run
+```
+
+**Terminal 3 — Nó 3 (conecta ao Nó 1 e 2):**
+```bash
+NEXOIA_API_PORT=3002 NEXOIA_UDP_PORT=9002 \
+NEXOIA_BOOTSTRAP_PEERS=127.0.0.1:9000,127.0.0.1:9001 \
+NEXOIA_NODE_NAME=node_gamma cargo run
+```
+
+### Com Passphrase (recomendado em produção)
+
+```bash
+NEXOIA_PASSPHRASE="minha-senha-forte" cargo run
+```
+
+### Verificando a rede
+
+```bash
+# Health check
+curl http://localhost:3000/health
+
+# Info do nó
+curl http://localhost:3000/node
+
+# Listar EPAs
+curl http://localhost:3000/epa/list
 ```
 
 ## Variáveis de Ambiente
@@ -63,7 +103,7 @@ NEXOIA_BOOTSTRAP_PEERS=127.0.0.1:9000 cargo run
 | `NEXOIA_DATA_DIR` | `.nexoia` | Diretório de persistência |
 | `NEXOIA_PASSPHRASE` | (nenhuma) | Passphrase para criptografar chave privada |
 | `NEXOIA_DISABLE_ENCRYPTION` | `false` | Desabilitar encriptação de EPA (debug) |
-| `NEXOIA_BOOTSTRAP_PEERS` | (nenhum) | Lista de peers iniciais (ex: `host1:9000,host2:9000`) |
+| `NEXOIA_BOOTSTRAP_PEERS` | (nenhum) | Peers iniciais (ex: `host1:9000,host2:9000`) |
 
 ## Segurança
 
@@ -76,19 +116,7 @@ NEXOIA_BOOTSTRAP_PEERS=127.0.0.1:9000 cargo run
 | Handshake | Challenge-response com Ed25519 |
 | Rate limiting | 100 req/min por IP na API HTTP |
 | Reputação | Ban após 10 falhas, expira em 24h |
-| Heartbeat | Detecção de peers inativos (5min timeout) |
-
-## API HTTP
-
-### Endpoints
-
-| Endpoint | Método | Descrição | Response |
-|----------|--------|-----------|----------|
-| `/health` | GET | Health check | `{"status": "ok"}` |
-| `/node` | GET | Info do nó | `{"node_id": "...", "epa_count": 0}` |
-| `/epa/list` | GET | Lista de EPAs | `[{epa_object}, ...]` |
-| `/epa` | POST | Enviar EPA | `{"status": "accepted"}` |
-| `/epa/:id/verify` | POST | Verificar EPA | `{"result": "VALID"}` |
+| Heartbeat | Detecção de peers inativos (30s interval, 5min timeout) |
 
 ## Persistência
 

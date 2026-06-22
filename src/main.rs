@@ -116,10 +116,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let node =
         NodeIdentity::load_or_create(&identity_path, &config.node_name, passphrase.as_deref())?;
-    println!("Node ID: {}", node.node_id);
-    println!("Public Key: {}...", &node.public_key[..16]);
 
-    let persisted = persistence::load_data(&data_path)?;
+    // Banner de inicialização
+    println!("╔══════════════════════════════════════════╗");
+    println!("║           NEXOIA Node Starting           ║");
+    println!("╚══════════════════════════════════════════╝");
+    println!();
+    println!("Node ID:      {}", node.node_id);
+    println!("Public Key:   {}...", &node.public_key[..16]);
+
+    // Status de segurança da chave
+    if passphrase.is_some() {
+        println!("Security:     🔐 PASSPHRASE ENABLED (keys encrypted)");
+    } else {
+        println!("Security:     ⚠️  NO PASSPHRASE (keys in plaintext)");
+        println!("              Set NEXOIA_PASSPHRASE to encrypt private keys.");
+    }
+    println!();
+
+    // Carrega dados persistidos
+    let persisted = match persistence::load_data(&data_path) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("⚠ Failed to load network data: {} (starting fresh)", e);
+            persistence::PersistedData::default()
+        }
+    };
+
     let known_peers = persistence::parse_peers(&persisted.peers);
 
     let api_addr: SocketAddr = ([127, 0, 0, 1], config.api_port).into();
@@ -131,23 +154,36 @@ async fn main() -> Result<(), Box<dyn Error>> {
         known_peers,
         config.max_peers,
     )));
+
     // Sistema de reputação persistente
     let reputation_path = config.data_dir.join("reputation.json");
     let mut reputation_store = ReputationStore::with_path(reputation_path);
-    reputation_store.load().unwrap_or_else(|e| {
-        eprintln!("Warning: Could not load reputation: {}", e);
-    });
+    match reputation_store.load() {
+        Ok(()) => {
+            let banned = reputation_store.banned_count();
+            if banned > 0 {
+                println!("Reputation:   Loaded ({} banned nodes)", banned);
+            } else {
+                println!("Reputation:   Loaded (no banned nodes)");
+            }
+        }
+        Err(e) => {
+            eprintln!("⚠ Reputation load failed: {} (starting fresh)", e);
+        }
+    }
     let reputation: Arc<RwLock<ReputationStore>> = Arc::new(RwLock::new(reputation_store));
+
     // Lista de peers autenticados via handshake (carrega do disco)
     let persisted_trusted =
         persistence::persisted_to_trusted(&persisted.trusted_peers, config.max_peers);
+    let trusted_count = persisted_trusted.len();
     let trusted_peers: Arc<RwLock<TrustedPeerList>> = Arc::new(RwLock::new(persisted_trusted));
-    if !persisted.trusted_peers.is_empty() {
-        println!(
-            "Loaded {} trusted peers from disk",
-            persisted.trusted_peers.len()
-        );
+    if trusted_count > 0 {
+        println!("Trusted:      {} peers loaded from disk", trusted_count);
+    } else {
+        println!("Trusted:      No trusted peers (will discover via handshake)");
     }
+
     // Estado dos peers para heartbeat
     let peer_states: Arc<RwLock<HashMap<SocketAddr, PeerState>>> =
         Arc::new(RwLock::new(HashMap::new()));
@@ -160,10 +196,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let udp_socket = UdpTransport::bind(udp_addr).await?;
-    println!("UDP listening on {}", udp_addr);
+    println!("Network:      UDP listening on {}", udp_addr);
+
     if config.disable_encryption {
-        println!("⚠ Encryption DISABLED (NEXOIA_DISABLE_ENCRYPTION=1)");
+        println!("Encryption:   ⚠️  DISABLED (NEXOIA_DISABLE_ENCRYPTION=1)");
+    } else {
+        println!("Encryption:   🔒 ENABLED (X25519 + ChaCha20-Poly1305)");
     }
+
+    println!("API:          http://{}", api_addr);
+    println!("Heartbeat:    Every 30s, timeout 5min");
+    println!();
 
     // Conecta a bootstrap peers (se configurados)
     if !config.bootstrap_peers.is_empty() {

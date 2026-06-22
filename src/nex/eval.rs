@@ -1,4 +1,4 @@
-use crate::nex::ast::{Action, Expr, Program, Stmt, Type};
+use crate::nex::ast::{Action, Comparator, Condition, Expr, LogicalOp, Program, Stmt, Type};
 use crate::provenance::typed_node::Marker;
 use crate::provenance::{
     Anchored, InsufficientWitnessesError, Local, Signed, TypedNode, Unverifiable, Witness,
@@ -334,6 +334,55 @@ fn execute_expanded(program: Program) -> Result<ExecutionResult, EvalError> {
                     reason: (!granted).then_some("ActionDenied".to_string()),
                 }));
             }
+            Stmt::If {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                let condition_met = evaluate_condition(&condition, &working);
+                let body = if condition_met {
+                    &then_body
+                } else {
+                    &else_body
+                };
+
+                // Executa o bloco correspondente
+                for stmt in body {
+                    match stmt.clone() {
+                        Stmt::Act {
+                            id,
+                            action,
+                            requires,
+                        } => {
+                            let record = working
+                                .get(id.as_str())
+                                .cloned()
+                                .or_else(|| current_subject.clone())
+                                .ok_or_else(|| EvalError::UnknownIdentifier { id: id.clone() })?;
+                            let actual = record.strength;
+                            let decision_id = action_decision_id(&id, action, requires);
+                            let granted = actual >= requires;
+
+                            entries.push(TraceEntry::Action(ActionView {
+                                id,
+                                decision_id,
+                                action,
+                                required_strength: requires,
+                                actual_strength: actual,
+                                granted,
+                                reason: if !granted {
+                                    Some("ActionDenied".to_string())
+                                } else {
+                                    Some("ConditionalMet".to_string())
+                                },
+                            }));
+                        }
+                        _ => {
+                            // Outros statements no bloco (por enquanto só Act é suportado)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -343,6 +392,66 @@ fn execute_expanded(program: Program) -> Result<ExecutionResult, EvalError> {
         .collect();
 
     Ok(ExecutionResult { env, entries })
+}
+
+/// Avalia uma condição composta.
+fn evaluate_condition(condition: &Condition, working: &HashMap<String, RuntimeState>) -> bool {
+    let left_record = match working.get(&condition.left_id) {
+        Some(r) => r,
+        None => return false,
+    };
+
+    let left_matches = match condition.comparator {
+        Comparator::Gte => left_record.strength >= condition.right_strength,
+        Comparator::Lte => left_record.strength <= condition.right_strength,
+        Comparator::Gt => left_record.strength > condition.right_strength,
+        Comparator::Lt => left_record.strength < condition.right_strength,
+        Comparator::Eq => left_record.strength == condition.right_strength,
+    };
+
+    if let Some(op) = condition.op {
+        let right_record = condition.right_id.as_ref().and_then(|id| working.get(id));
+        let right_matches = match (op, &condition.right_comparator, &condition.right_strength2) {
+            (LogicalOp::And, Some(Comparator::Gte), Some(s2)) => {
+                right_record.map_or(false, |r| r.strength >= *s2)
+            }
+            (LogicalOp::And, Some(Comparator::Lte), Some(s2)) => {
+                right_record.map_or(false, |r| r.strength <= *s2)
+            }
+            (LogicalOp::And, Some(Comparator::Gt), Some(s2)) => {
+                right_record.map_or(false, |r| r.strength > *s2)
+            }
+            (LogicalOp::And, Some(Comparator::Lt), Some(s2)) => {
+                right_record.map_or(false, |r| r.strength < *s2)
+            }
+            (LogicalOp::And, Some(Comparator::Eq), Some(s2)) => {
+                right_record.map_or(false, |r| r.strength == *s2)
+            }
+            (LogicalOp::Or, Some(Comparator::Gte), Some(s2)) => {
+                right_record.map_or(false, |r| r.strength >= *s2)
+            }
+            (LogicalOp::Or, Some(Comparator::Lte), Some(s2)) => {
+                right_record.map_or(false, |r| r.strength <= *s2)
+            }
+            (LogicalOp::Or, Some(Comparator::Gt), Some(s2)) => {
+                right_record.map_or(false, |r| r.strength > *s2)
+            }
+            (LogicalOp::Or, Some(Comparator::Lt), Some(s2)) => {
+                right_record.map_or(false, |r| r.strength < *s2)
+            }
+            (LogicalOp::Or, Some(Comparator::Eq), Some(s2)) => {
+                right_record.map_or(false, |r| r.strength == *s2)
+            }
+            _ => false,
+        };
+
+        match op {
+            LogicalOp::And => left_matches && right_matches,
+            LogicalOp::Or => left_matches || right_matches,
+        }
+    } else {
+        left_matches
+    }
 }
 
 fn expand_statements(

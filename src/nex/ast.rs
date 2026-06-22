@@ -56,6 +56,11 @@ pub enum Stmt {
         action: Action,
         requires: EvidenceStrength,
     },
+    If {
+        condition: Condition,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,4 +75,33 @@ pub enum Expr {
 pub enum Type {
     I64,
     String,
+}
+
+/// Comparador para condições.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Comparator {
+    Gte,
+    Lte,
+    Gt,
+    Lt,
+    Eq,
+}
+
+/// Operador lógico para composição de condições.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LogicalOp {
+    And,
+    Or,
+}
+
+/// Condição composta: `evidence >= strength && evidence2 >= strength2`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Condition {
+    pub left_id: String,
+    pub comparator: Comparator,
+    pub right_strength: EvidenceStrength,
+    pub op: Option<LogicalOp>,
+    pub right_id: Option<String>,
+    pub right_comparator: Option<Comparator>,
+    pub right_strength2: Option<EvidenceStrength>,
 }

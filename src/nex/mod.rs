@@ -5,7 +5,7 @@ pub mod parser;
 use blake3::Hasher;
 use serde::Serialize;
 
-pub use ast::{Action, Expr, Program, Stmt, Type};
+pub use ast::{Action, Comparator, Condition, Expr, LogicalOp, Program, Stmt, Type};
 pub use eval::{
     eval, eval_in_dir, execute, execute_in_dir, expand_program, ActionView, Env, EvalError,
     ExecutionResult, NodeView, TraceEntry, TypedNodeValue,

@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fmt;
 
 use super::{
-    ast::{Action, Expr, Program, Stmt, Type},
+    ast::{Action, Comparator, Condition, Expr, LogicalOp, Program, Stmt, Type},
     NEX_VERSION,
 };
 
@@ -291,6 +291,7 @@ fn parse_statement(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError>
         "attest" => parse_attest(tokens, line_no),
         "assert" => parse_assert(tokens, line_no),
         "act" => parse_act(tokens, line_no),
+        "if" => parse_if(tokens, line_no),
         other => Err(ParseError::new(
             line_no,
             first.column,
@@ -538,6 +539,131 @@ fn parse_act(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError> {
         action,
         requires,
     })
+}
+
+fn parse_if(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError> {
+    // if <id> >= <strength>
+    let id = expect_word(tokens, 1, line_no, "expected identifier after 'if'")?;
+    let gte_token = tokens.get(2).ok_or_else(|| {
+        ParseError::new(
+            line_no,
+            tokens[1].column + 1,
+            "expected '>=' after identifier",
+        )
+    })?;
+    if !matches!(gte_token.kind, TokenKind::Gte) {
+        return Err(ParseError::new(
+            line_no,
+            gte_token.column,
+            "expected '>=' after identifier",
+        ));
+    }
+    let strength_token = tokens
+        .get(3)
+        .ok_or_else(|| ParseError::new(line_no, gte_token.column, "missing strength after '>='"))?;
+    let right_strength = parse_strength(strength_token, line_no)?;
+
+    // Verifica se há operador lógico (&& ou ||)
+    let mut op = None;
+    let mut right_id = None;
+    let mut right_comparator = None;
+    let mut right_strength2 = None;
+
+    if let Some(next_token) = tokens.get(4) {
+        let next_text = word(next_token, line_no)?;
+        if next_text == "&&" || next_text == "||" {
+            op = Some(if next_text == "&&" {
+                LogicalOp::And
+            } else {
+                LogicalOp::Or
+            });
+
+            // Segunda condição: <id> >= <strength>
+            let id2 = expect_word(tokens, 5, line_no, "expected identifier after '&&'")?;
+            let gte2 = tokens.get(6).ok_or_else(|| {
+                ParseError::new(
+                    line_no,
+                    tokens[5].column + 1,
+                    "expected '>=' after identifier",
+                )
+            })?;
+            if !matches!(gte2.kind, TokenKind::Gte) {
+                return Err(ParseError::new(
+                    line_no,
+                    gte2.column,
+                    "expected '>=' after identifier",
+                ));
+            }
+            let strength2 = tokens.get(7).ok_or_else(|| {
+                ParseError::new(line_no, gte2.column, "missing strength after '>='")
+            })?;
+            let right_strength2_val = parse_strength(strength2, line_no)?;
+
+            right_id = Some(id2);
+            right_comparator = Some(Comparator::Gte);
+            right_strength2 = Some(right_strength2_val);
+        }
+    }
+
+    // then: (neste caso simplificado, não suportamos then/else com blocos)
+    // Por enquanto, if/else é uma expressão de uma linha que retorna um Stmt::Act
+    // Precisamos de uma abordagem diferente: if/else retorna um bloco de statements
+    // Mas para simplicidade inicial, vamos suportar apenas if simples que executa uma ação
+
+    // Para uma implementação completa, precisaríamos de parse_block
+    // Por agora, suportamos apenas:
+    // if <id> >= <strength>: allow/deny/escalate
+    // else: allow/deny/escalate
+
+    // Verifica se há ':' indicando início de bloco simplificado
+    // ou se há ': allow' / ': deny' / ': escalate' na mesma linha
+
+    // Para simplicidade, vamos suportar if/else em duas linhas:
+    // if <id> >= <strength>: allow
+    // else: deny
+
+    // Mas isso requer múltiplas linhas e um parser de blocos
+    // Por agora, vamos suportar apenas if simples com ação na mesma linha
+
+    // Verifica se há ':' e uma ação
+    let colon_token = tokens.get(if op.is_some() { 8 } else { 4 });
+    if let Some(colon) = colon_token {
+        if matches!(colon.kind, TokenKind::Word(ref w) if w == ":") {
+            // Há ':' e uma ação depois
+            let action_idx = if op.is_some() { 9 } else { 5 };
+            let action_token = tokens.get(action_idx).ok_or_else(|| {
+                ParseError::new(line_no, colon.column, "expected action after ':'")
+            })?;
+            let action = parse_action(action_token, line_no)?;
+
+            let condition = Condition {
+                left_id: id.clone(),
+                comparator: Comparator::Gte,
+                right_strength,
+                op,
+                right_id,
+                right_comparator,
+                right_strength2,
+            };
+
+            return Ok(Stmt::If {
+                condition,
+                then_body: vec![Stmt::Act {
+                    id,
+                    action,
+                    requires: right_strength,
+                }],
+                else_body: vec![],
+            });
+        }
+    }
+
+    // Se não há ':', erro de sintaxe
+    Err(ParseError::new(
+        line_no,
+        tokens.last().map(|t| t.column).unwrap_or(1),
+        "expected ':' after condition in if statement",
+    ))
 }
 
 fn parse_import_path(token: &Token, line_no: usize) -> Result<String, ParseError> {

@@ -10,15 +10,34 @@ use tokio::sync::RwLock;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NetworkMessage {
     EPA(SharedEPA),
-    Ping { node_id: String },
-    Pong { node_id: String },
-    Discover { node_id: String, address: String },
+    Ping {
+        node_id: String,
+    },
+    Pong {
+        node_id: String,
+    },
+    Discover {
+        node_id: String,
+        address: String,
+    },
     // Handshake
-    Hello { node_id: String, public_key: String },
-    Challenge { challenge_hash: String },
-    ChallengeResponse { signature: Vec<u8> },
-    HandshakeOk { node_id: String },
-    HandshakeFailed { reason: String },
+    Hello {
+        node_id: String,
+        public_key: String,
+        encryption_public_key: Vec<u8>,
+    },
+    Challenge {
+        challenge_hash: String,
+    },
+    ChallengeResponse {
+        signature: Vec<u8>,
+    },
+    HandshakeOk {
+        node_id: String,
+    },
+    HandshakeFailed {
+        reason: String,
+    },
 }
 
 /// Peer autenticado via handshake.
@@ -26,6 +45,7 @@ pub enum NetworkMessage {
 pub struct TrustedPeer {
     pub node_id: String,
     pub public_key: String,
+    pub encryption_public_key: [u8; 32],
     pub addr: SocketAddr,
     pub authenticated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -230,6 +250,7 @@ mod tests {
         let peer1 = TrustedPeer {
             node_id: "node_a".to_string(),
             public_key: "key_a".to_string(),
+            encryption_public_key: [1u8; 32],
             addr: addr1,
             authenticated_at: chrono::Utc::now(),
         };
@@ -237,6 +258,7 @@ mod tests {
         let peer2 = TrustedPeer {
             node_id: "node_b".to_string(),
             public_key: "key_b".to_string(),
+            encryption_public_key: [2u8; 32],
             addr: addr2,
             authenticated_at: chrono::Utc::now(),
         };

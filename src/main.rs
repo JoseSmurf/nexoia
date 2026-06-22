@@ -58,6 +58,7 @@ struct Config {
     broadcast_port: u16,
     max_peers: usize,
     node_name: String,
+    disable_encryption: bool,
 }
 
 impl Config {
@@ -86,6 +87,9 @@ impl Config {
                 .unwrap_or(10),
             node_name: std::env::var("NEXOIA_NODE_NAME")
                 .unwrap_or_else(|_| "nexoia_node".to_string()),
+            disable_encryption: std::env::var("NEXOIA_DISABLE_ENCRYPTION")
+                .map(|v| v == "1" || v == "true")
+                .unwrap_or(false),
         }
     }
 }
@@ -133,6 +137,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let udp_socket = UdpTransport::bind(udp_addr).await?;
     println!("UDP listening on {}", udp_addr);
+    if config.disable_encryption {
+        println!("⚠ Encryption DISABLED (NEXOIA_DISABLE_ENCRYPTION=1)");
+    }
 
     let node_clone = node.clone();
     let epas_clone = Arc::clone(&epas);
@@ -140,6 +147,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let trusted_clone = Arc::clone(&trusted_peers);
     let reputation_clone = Arc::clone(&reputation);
     let data_path_clone = data_path.clone();
+    let disable_encryption = config.disable_encryption;
 
     tokio::spawn(async move {
         run_udp_listener(
@@ -150,6 +158,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             trusted_clone,
             reputation_clone,
             data_path_clone,
+            disable_encryption,
         )
         .await;
     });
@@ -293,14 +302,16 @@ async fn run_udp_listener(
     trusted_peers: Arc<RwLock<TrustedPeerList>>,
     reputation: Arc<RwLock<ReputationStore>>,
     data_path: PathBuf,
+    disable_encryption: bool,
 ) {
     loop {
         match transport.recv().await {
             Ok((msg, addr)) => match msg {
-                // Handshake: Nó A envia Hello com node_id + public_key
+                // Handshake: Nó A envia Hello com node_id + public_key + encryption_key
                 NetworkMessage::Hello {
                     node_id,
                     public_key,
+                    encryption_public_key,
                 } => {
                     println!("Handshake: Hello from {} at {}", node_id, addr);
 
@@ -315,8 +326,8 @@ async fn run_udp_listener(
                     };
                     let _ = transport.send(&challenge, addr).await;
 
-                    // Guarda o challenge para verificação futura
-                    // (Em produção, seria armazenado temporariamente)
+                    // Guarda o challenge e a chave de encriptação para verificação futura
+                    // (Em produção, seria armazenado temporariamente com o node_id)
                     println!("  → Sent challenge to {}", addr);
                 }
 
@@ -342,10 +353,12 @@ async fn run_udp_listener(
                     // Por simplicidade, aceitamos se a assinatura não estiver vazia
                     if !signature.is_empty() {
                         // Adiciona como peer confiável
+                        // Nota: encryption_public_key seria extraído do Hello em produção
                         let mut trusted = trusted_peers.write().await;
                         let peer = TrustedPeer {
                             node_id: format!("peer_{}", addr),
-                            public_key: String::new(), // Seria preenchido no Hello
+                            public_key: String::new(),
+                            encryption_public_key: [0u8; 32], // Seria preenchido do Hello
                             addr,
                             authenticated_at: chrono::Utc::now(),
                         };
@@ -410,11 +423,30 @@ async fn run_udp_listener(
                 }
 
                 // EPA: Só aceita de peers autenticados
-                NetworkMessage::EPA(epa) => {
+                NetworkMessage::EPA(mut epa) => {
                     let trusted = trusted_peers.read().await;
                     if !trusted.contains(&addr) {
                         eprintln!("✗ EPA rejected: {} not in trusted peers", addr);
                         continue;
+                    }
+
+                    // Descriptografa se necessário
+                    if !disable_encryption && epa.encrypted_payload.is_some() {
+                        match epa.decrypt_payload(
+                            &node.encryption_keypair,
+                            &[0u8; 32], // Em produção: chave pública do remetente
+                        ) {
+                            Ok(decrypted) => {
+                                println!("✓ EPA decrypted from {}", addr);
+                                // Aqui você processaria o payload descriptografado
+                                let _ = decrypted;
+                            }
+                            Err(e) => {
+                                eprintln!("✗ EPA decryption failed from {}: {}", addr, epa.node_id);
+                                increment_failure(&reputation, &epa.node_id).await;
+                                continue;
+                            }
+                        }
                     }
                     drop(trusted);
 

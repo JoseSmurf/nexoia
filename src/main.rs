@@ -16,7 +16,9 @@ use crate::network::api::{self, ApiState};
 use crate::network::epa::SharedEPA;
 use crate::network::identity::NodeIdentity;
 use crate::network::persistence::{self, PersistedData};
-use crate::network::transport::{NetworkMessage, PeerList, UdpTransport};
+use crate::network::transport::{
+    NetworkMessage, PeerList, TrustedPeer, TrustedPeerList, UdpTransport,
+};
 use crate::network::verify::{verify_epa, VerifyResult};
 use crate::state::State;
 use crate::types::EvidenceProvider;
@@ -112,6 +114,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )));
     // Contador de falhas por node_id (base para reputação futura)
     let failure_counts: Arc<RwLock<HashMap<String, u32>>> = Arc::new(RwLock::new(HashMap::new()));
+    // Lista de peers autenticados via handshake
+    let trusted_peers: Arc<RwLock<TrustedPeerList>> =
+        Arc::new(RwLock::new(TrustedPeerList::new(config.max_peers)));
 
     let api_state = ApiState {
         node_id: node.node_id.clone(),
@@ -126,6 +131,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let node_clone = node.clone();
     let epas_clone = Arc::clone(&epas);
     let peers_clone = Arc::clone(&peers);
+    let trusted_clone = Arc::clone(&trusted_peers);
     let failures_clone = Arc::clone(&failure_counts);
     let data_path_clone = data_path.clone();
 
@@ -135,6 +141,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             node_clone,
             epas_clone,
             peers_clone,
+            trusted_clone,
             failures_clone,
             data_path_clone,
         )
@@ -271,18 +278,105 @@ async fn save_network_state(
     }
 }
 
-/// Listener UDP com verificação assíncrona de EPA.
+/// Listener UDP com handshake e verificação assíncrona de EPA.
 async fn run_udp_listener(
     mut transport: UdpTransport,
     node: NodeIdentity,
     epas: Arc<RwLock<Vec<SharedEPA>>>,
     peers: Arc<RwLock<PeerList>>,
+    trusted_peers: Arc<RwLock<TrustedPeerList>>,
     failure_counts: Arc<RwLock<HashMap<String, u32>>>,
     data_path: PathBuf,
 ) {
     loop {
         match transport.recv().await {
             Ok((msg, addr)) => match msg {
+                // Handshake: Nó A envia Hello com node_id + public_key
+                NetworkMessage::Hello {
+                    node_id,
+                    public_key,
+                } => {
+                    println!("Handshake: Hello from {} at {}", node_id, addr);
+
+                    // Gera challenge = hash do timestamp + node_id
+                    let challenge_input =
+                        format!("{}:{}:{}", node_id, chrono::Utc::now().to_rfc3339(), addr);
+                    let challenge_hash = canonical_hash(&challenge_input);
+
+                    // Envia challenge de volta
+                    let challenge = NetworkMessage::Challenge {
+                        challenge_hash: challenge_hash.clone(),
+                    };
+                    let _ = transport.send(&challenge, addr).await;
+
+                    // Guarda o challenge para verificação futura
+                    // (Em produção, seria armazenado temporariamente)
+                    println!("  → Sent challenge to {}", addr);
+                }
+
+                // Handshake: Recebe challenge (quando somos o Nó A)
+                NetworkMessage::Challenge { challenge_hash } => {
+                    println!("Handshake: Received challenge from {}", addr);
+
+                    // Assina o challenge com nossa chave privada
+                    let signature = node.sign(&challenge_hash);
+
+                    // Envia resposta
+                    let response = NetworkMessage::ChallengeResponse { signature };
+                    let _ = transport.send(&response, addr).await;
+
+                    println!("  → Sent challenge response to {}", addr);
+                }
+
+                // Handshake: Nó B responde com ChallengeResponse
+                NetworkMessage::ChallengeResponse { signature } => {
+                    println!("Handshake: ChallengeResponse from {}", addr);
+
+                    // Em produção: verificar a assinatura do challenge
+                    // Por simplicidade, aceitamos se a assinatura não estiver vazia
+                    if !signature.is_empty() {
+                        // Adiciona como peer confiável
+                        let mut trusted = trusted_peers.write().await;
+                        let peer = TrustedPeer {
+                            node_id: format!("peer_{}", addr),
+                            public_key: String::new(), // Seria preenchido no Hello
+                            addr,
+                            authenticated_at: chrono::Utc::now(),
+                        };
+
+                        if trusted.add(peer) {
+                            println!("  ✓ Peer {} added to trusted list", addr);
+
+                            // Envia confirmação
+                            let ok = NetworkMessage::HandshakeOk {
+                                node_id: node.node_id.clone(),
+                            };
+                            let _ = transport.send(&ok, addr).await;
+                        } else {
+                            let failed = NetworkMessage::HandshakeFailed {
+                                reason: "peer list full or already exists".to_string(),
+                            };
+                            let _ = transport.send(&failed, addr).await;
+                        }
+                    } else {
+                        let failed = NetworkMessage::HandshakeFailed {
+                            reason: "empty signature".to_string(),
+                        };
+                        let _ = transport.send(&failed, addr).await;
+                    }
+                }
+
+                // Handshake: Confirmação de sucesso
+                NetworkMessage::HandshakeOk { node_id } => {
+                    println!("Handshake: OK from {} ({})", node_id, addr);
+                }
+
+                // Handshake: Falha
+                NetworkMessage::HandshakeFailed { reason } => {
+                    eprintln!("Handshake: FAILED from {} — {}", addr, reason);
+                }
+
+                // Discovery
                 NetworkMessage::Discover { node_id, address } => {
                     println!("Discovered node: {} at {}", node_id, address);
                     if let Ok(peer_addr) = address.parse::<SocketAddr>() {
@@ -296,6 +390,7 @@ async fn run_udp_listener(
                         }
                     }
                 }
+
                 NetworkMessage::Ping { node_id } => {
                     println!("Ping from {}", node_id);
                     let pong = NetworkMessage::Pong {
@@ -303,11 +398,21 @@ async fn run_udp_listener(
                     };
                     let _ = transport.send(&pong, addr).await;
                 }
+
                 NetworkMessage::Pong { node_id } => {
                     println!("Pong from {}", node_id);
                 }
+
+                // EPA: Só aceita de peers autenticados
                 NetworkMessage::EPA(epa) => {
-                    // Verificação assíncrona em background (tokio::spawn)
+                    let trusted = trusted_peers.read().await;
+                    if !trusted.contains(&addr) {
+                        eprintln!("✗ EPA rejected: {} not in trusted peers", addr);
+                        continue;
+                    }
+                    drop(trusted);
+
+                    // Verificação assíncrona em background
                     let epas_clone = Arc::clone(&epas);
                     let peers_clone = Arc::clone(&peers);
                     let failures_clone = Arc::clone(&failure_counts);

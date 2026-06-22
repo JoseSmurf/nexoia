@@ -1,16 +1,86 @@
 use crate::network::epa::SharedEPA;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::UdpSocket;
+use tokio::sync::RwLock;
 
+/// Mensagens de rede entre nós.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NetworkMessage {
     EPA(SharedEPA),
     Ping { node_id: String },
     Pong { node_id: String },
     Discover { node_id: String, address: String },
+    // Handshake
+    Hello { node_id: String, public_key: String },
+    Challenge { challenge_hash: String },
+    ChallengeResponse { signature: Vec<u8> },
+    HandshakeOk { node_id: String },
+    HandshakeFailed { reason: String },
 }
 
+/// Peer autenticado via handshake.
+#[derive(Debug, Clone)]
+pub struct TrustedPeer {
+    pub node_id: String,
+    pub public_key: String,
+    pub addr: SocketAddr,
+    pub authenticated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Lista de peers autenticados.
+pub struct TrustedPeerList {
+    peers: HashMap<SocketAddr, TrustedPeer>,
+    max_peers: usize,
+}
+
+impl TrustedPeerList {
+    pub fn new(max_peers: usize) -> Self {
+        Self {
+            peers: HashMap::new(),
+            max_peers,
+        }
+    }
+
+    pub fn add(&mut self, peer: TrustedPeer) -> bool {
+        if self.peers.contains_key(&peer.addr) {
+            return false;
+        }
+        if self.peers.len() >= self.max_peers {
+            return false;
+        }
+        self.peers.insert(peer.addr, peer);
+        true
+    }
+
+    pub fn get(&self, addr: &SocketAddr) -> Option<&TrustedPeer> {
+        self.peers.get(addr)
+    }
+
+    pub fn contains(&self, addr: &SocketAddr) -> bool {
+        self.peers.contains_key(addr)
+    }
+
+    pub fn len(&self) -> usize {
+        self.peers.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.peers.is_empty()
+    }
+
+    pub fn peers(&self) -> Vec<&TrustedPeer> {
+        self.peers.values().collect()
+    }
+
+    pub fn addrs(&self) -> Vec<SocketAddr> {
+        self.peers.keys().copied().collect()
+    }
+}
+
+/// UDP Transport para comunicação entre nós.
 pub struct UdpTransport {
     socket: UdpSocket,
     recv_buffer: [u8; 65536],
@@ -61,6 +131,7 @@ impl UdpTransport {
     }
 }
 
+/// Lista de peers (legado, mantida para compatibilidade).
 pub struct PeerList {
     peers: Vec<SocketAddr>,
     max_peers: usize,
@@ -148,5 +219,33 @@ mod tests {
         assert!(list.add(addr2));
         assert!(!list.add(addr3));
         assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn trusted_peer_list_basic() {
+        let mut list = TrustedPeerList::new(2);
+        let addr1: SocketAddr = "127.0.0.1:9001".parse().unwrap();
+        let addr2: SocketAddr = "127.0.0.1:9002".parse().unwrap();
+
+        let peer1 = TrustedPeer {
+            node_id: "node_a".to_string(),
+            public_key: "key_a".to_string(),
+            addr: addr1,
+            authenticated_at: chrono::Utc::now(),
+        };
+
+        let peer2 = TrustedPeer {
+            node_id: "node_b".to_string(),
+            public_key: "key_b".to_string(),
+            addr: addr2,
+            authenticated_at: chrono::Utc::now(),
+        };
+
+        assert!(list.add(peer1.clone()));
+        assert!(list.add(peer2));
+        assert!(!list.add(peer1));
+        assert_eq!(list.len(), 2);
+        assert!(list.contains(&addr1));
+        assert!(list.contains(&addr2));
     }
 }

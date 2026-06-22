@@ -59,6 +59,7 @@ struct Config {
     max_peers: usize,
     node_name: String,
     disable_encryption: bool,
+    bootstrap_peers: Vec<SocketAddr>,
 }
 
 impl Config {
@@ -90,6 +91,13 @@ impl Config {
             disable_encryption: std::env::var("NEXOIA_DISABLE_ENCRYPTION")
                 .map(|v| v == "1" || v == "true")
                 .unwrap_or(false),
+            bootstrap_peers: std::env::var("NEXOIA_BOOTSTRAP_PEERS")
+                .map(|s| {
+                    s.split(',')
+                        .filter_map(|addr| addr.trim().parse().ok())
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }
@@ -155,6 +163,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("UDP listening on {}", udp_addr);
     if config.disable_encryption {
         println!("⚠ Encryption DISABLED (NEXOIA_DISABLE_ENCRYPTION=1)");
+    }
+
+    // Conecta a bootstrap peers (se configurados)
+    if !config.bootstrap_peers.is_empty() {
+        println!(
+            "Connecting to {} bootstrap peers...",
+            config.bootstrap_peers.len()
+        );
+        let bootstrap_socket = UdpSocket::bind("0.0.0.0:0").await?;
+        for peer_addr in &config.bootstrap_peers {
+            let hello = NetworkMessage::Hello {
+                node_id: node.node_id.clone(),
+                public_key: node.public_key.clone(),
+                encryption_public_key: node.encryption_keypair.public_bytes().to_vec(),
+            };
+            if let Ok(data) = serde_json::to_vec(&hello) {
+                let _ = bootstrap_socket.send_to(&data, peer_addr).await;
+                println!("  → Sent Hello to {}", peer_addr);
+            }
+        }
     }
 
     // Spawn heartbeat sender

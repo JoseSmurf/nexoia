@@ -1,6 +1,6 @@
 # NexoIA
 
-Rede de auditoria descentralizada. Nós executam pipeline determinístico local e compartilham EPAs (Evidence-Proof-Artifacts) verificáveis.
+Rede de auditoria descentralizada. Nós executam pipeline determinístico local e compartilham EPAs (Evidence-Proof-Artifacts) verificáveis e encriptados.
 
 ## Arquitetura
 
@@ -29,16 +29,12 @@ Rede de auditoria descentralizada. Nós executam pipeline determinístico local 
 │  │                      network                            │   │
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────┐ │   │
 │  │  │ identity │  │   epa    │  │ transport│  │   api  │ │   │
+│  │  │ (crypto) │  │ (sign+   │  │ (UDP+HB) │  │ (REST) │ │   │
+│  │  │          │  │  encrypt)│  │          │  │        │ │   │
 │  │  └──────────┘  └──────────┘  └──────────┘  └────────┘ │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                    ┌─────────────────┐
-                    │  Other Nodes    │
-                    │  (UDP/API)      │
-                    └─────────────────┘
 ```
 
 ## Quick Start
@@ -47,8 +43,12 @@ Rede de auditoria descentralizada. Nós executam pipeline determinístico local 
 # Nó 1
 cargo run
 
-# Nó 2 (outro terminal)
+# Nó 2 (outro terminal, porta diferente)
 NEXOIA_API_PORT=3001 NEXOIA_UDP_PORT=9001 cargo run
+
+# Nó 2 conectando ao Nó 1 via bootstrap
+NEXOIA_API_PORT=3001 NEXOIA_UDP_PORT=9001 \
+NEXOIA_BOOTSTRAP_PEERS=127.0.0.1:9000 cargo run
 ```
 
 ## Variáveis de Ambiente
@@ -61,6 +61,22 @@ NEXOIA_API_PORT=3001 NEXOIA_UDP_PORT=9001 cargo run
 | `NEXOIA_MAX_PEERS` | `10` | Máximo de peers conectados |
 | `NEXOIA_NODE_NAME` | `nexoia_node` | Nome do nó |
 | `NEXOIA_DATA_DIR` | `.nexoia` | Diretório de persistência |
+| `NEXOIA_PASSPHRASE` | (nenhuma) | Passphrase para criptografar chave privada |
+| `NEXOIA_DISABLE_ENCRYPTION` | `false` | Desabilitar encriptação de EPA (debug) |
+| `NEXOIA_BOOTSTRAP_PEERS` | (nenhum) | Lista de peers iniciais (ex: `host1:9000,host2:9000`) |
+
+## Segurança
+
+| Camada | Mecanismo |
+|--------|-----------|
+| Identidade | Ed25519 (assinatura) + X25519 (encriptação) |
+| Chave privada | PBKDF2 + AES-256-GCM (com passphrase) |
+| EPA | Assinatura Ed25519 + timestamp bidirecional |
+| Transporte | ChaCha20-Poly1305 (entre trusted peers) |
+| Handshake | Challenge-response com Ed25519 |
+| Rate limiting | 100 req/min por IP na API HTTP |
+| Reputação | Ban após 10 falhas, expira em 24h |
+| Heartbeat | Detecção de peers inativos (5min timeout) |
 
 ## API HTTP
 
@@ -68,39 +84,17 @@ NEXOIA_API_PORT=3001 NEXOIA_UDP_PORT=9001 cargo run
 
 | Endpoint | Método | Descrição | Response |
 |----------|--------|-----------|----------|
-| `/health` | GET | Health check | `{"status": "ok", "message": "..."}` |
+| `/health` | GET | Health check | `{"status": "ok"}` |
 | `/node` | GET | Info do nó | `{"node_id": "...", "epa_count": 0}` |
 | `/epa/list` | GET | Lista de EPAs | `[{epa_object}, ...]` |
-| `/epa` | POST | Enviar EPA | `{"status": "accepted", "message": "..."}` |
-| `/epa/:id/verify` | POST | Verificar EPA | `{"result": "VALID", "epa_id": "..."}` |
-
-### Exemplos
-
-```bash
-# Health check
-curl http://localhost:3000/health
-
-# Ver info do nó
-curl http://localhost:3000/node
-
-# Listar EPAs
-curl http://localhost:3000/epa/list
-
-# Enviar EPA
-curl -X POST http://localhost:3000/epa \
-  -H "Content-Type: application/json" \
-  -d @epa.json
-
-# Verificar EPA
-curl -X POST http://localhost:3000/epa/abc123/verify \
-  -H "Content-Type: application/json" \
-  -d '{"state_json": "...", "evidence_jsonl": "..."}'
-```
+| `/epa` | POST | Enviar EPA | `{"status": "accepted"}` |
+| `/epa/:id/verify` | POST | Verificar EPA | `{"result": "VALID"}` |
 
 ## Persistência
 
-- `.nexoia/identity.json` — Identidade do nó (sobrevive restarts)
-- `.nexoia/network.json` — Peers e EPAs (sobrevive restarts)
+- `.nexoia/identity.json` — Identidade (chaves criptografadas com passphrase)
+- `.nexoia/network.json` — Peers, EPAs e TrustedPeerList
+- `.nexoia/reputation.json` — Reputação de nós
 
 ## Testes
 

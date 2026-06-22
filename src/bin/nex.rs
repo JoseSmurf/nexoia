@@ -2,6 +2,8 @@
 
 #[path = "../hash.rs"]
 mod hash;
+#[path = "../network/mod.rs"]
+mod network;
 #[path = "../nex/mod.rs"]
 mod nex;
 #[path = "../provenance/mod.rs"]

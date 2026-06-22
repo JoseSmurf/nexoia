@@ -1,6 +1,8 @@
 pub mod action_executor;
 pub mod ast;
+pub mod checkpoint;
 pub mod eval;
+pub mod layers;
 pub mod parser;
 pub mod reactive;
 

@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod eval;
 pub mod parser;
+pub mod reactive;
 
 use blake3::Hasher;
 use serde::Serialize;

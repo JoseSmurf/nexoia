@@ -4,6 +4,7 @@
 
 use crate::network::reputation::ReputationStore;
 use crate::network::transport::PeerState;
+use crate::nex::layers::NexLayer;
 use crate::nex::reactive::ExecutableAction;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -154,16 +155,18 @@ mod tests {
     #[test]
     fn full_pipeline_heartbeat_miss() {
         // Arrange
-        let mut engine = ReactiveEngine::new();
-        engine.add_rule(ReactiveRule {
-            trigger: Trigger::HeartbeatMiss { threshold: 3 },
-            actions: vec![
-                crate::nex::ast::ReactiveAction::Log("Peer inativo".to_string()),
-                crate::nex::ast::ReactiveAction::MarkInactive {
-                    peer: "node_a".to_string(),
-                },
-            ],
-        });
+        let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
+        engine
+            .add_rule(ReactiveRule {
+                trigger: Trigger::HeartbeatMiss { threshold: 3 },
+                actions: vec![
+                    crate::nex::ast::ReactiveAction::Log("Peer inativo".to_string()),
+                    crate::nex::ast::ReactiveAction::MarkInactive {
+                        peer: "node_a".to_string(),
+                    },
+                ],
+            })
+            .unwrap();
 
         let addr: SocketAddr = "127.0.0.1:9001".parse().unwrap();
         let mut peer_states = HashMap::new();

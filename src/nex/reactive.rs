@@ -1,8 +1,10 @@
 //! reactive.rs — Motor de comportamentos reativos da NEX
 //!
 //! Separa avaliação de regras (determinística) de execução de ações (efeitos colaterais).
+//! Suporta validação de camadas NEX.
 
 use crate::nex::ast::{ReactiveAction, Trigger};
+use crate::nex::layers::NexLayer;
 use std::fmt;
 
 /// Evento que dispara regras reativas.
@@ -37,19 +39,67 @@ pub struct EvaluationResult {
     pub actions: Vec<ExecutableAction>,
 }
 
+/// Erro ao adicionar regra reativa.
+#[derive(Debug, Clone)]
+pub enum RuleError {
+    LayerTooLow {
+        required: NexLayer,
+        current: NexLayer,
+    },
+}
+
+impl fmt::Display for RuleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RuleError::LayerTooLow { required, current } => {
+                write!(
+                    f,
+                    "reactive rules require {} layer, but current is {}",
+                    required, current
+                )
+            }
+        }
+    }
+}
+
 /// Motor de comportamentos reativos.
 /// Separa avaliação de regras (determinística) de execução de ações.
 pub struct ReactiveEngine {
     rules: Vec<ReactiveRule>,
+    layer: NexLayer,
 }
 
 impl ReactiveEngine {
     pub fn new() -> Self {
-        Self { rules: Vec::new() }
+        Self {
+            rules: Vec::new(),
+            layer: NexLayer::Basic,
+        }
     }
 
-    pub fn add_rule(&mut self, rule: ReactiveRule) {
+    /// Cria motor com camada específica.
+    pub fn with_layer(layer: NexLayer) -> Self {
+        Self {
+            rules: Vec::new(),
+            layer,
+        }
+    }
+
+    /// Retorna a camada atual do motor.
+    pub fn layer(&self) -> NexLayer {
+        self.layer
+    }
+
+    /// Adiciona regras reativas (requer camada Advanced).
+    pub fn add_rule(&mut self, rule: ReactiveRule) -> Result<(), RuleError> {
+        if self.layer < NexLayer::Advanced {
+            return Err(RuleError::LayerTooLow {
+                required: NexLayer::Advanced,
+                current: self.layer,
+            });
+        }
         self.rules.push(rule);
+        Ok(())
     }
 
     pub fn rules(&self) -> &[ReactiveRule] {
@@ -160,11 +210,13 @@ mod tests {
 
     #[test]
     fn heartbeat_miss_triggers_rule() {
-        let mut engine = ReactiveEngine::new();
-        engine.add_rule(ReactiveRule {
-            trigger: Trigger::HeartbeatMiss { threshold: 3 },
-            actions: vec![ReactiveAction::Log("Peer inativo".to_string())],
-        });
+        let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
+        engine
+            .add_rule(ReactiveRule {
+                trigger: Trigger::HeartbeatMiss { threshold: 3 },
+                actions: vec![ReactiveAction::Log("Peer inativo".to_string())],
+            })
+            .unwrap();
 
         let event = NetworkEvent::HeartbeatMiss { count: 4 };
         let result = engine.evaluate(&event);
@@ -176,11 +228,13 @@ mod tests {
 
     #[test]
     fn heartbeat_miss_below_threshold() {
-        let mut engine = ReactiveEngine::new();
-        engine.add_rule(ReactiveRule {
-            trigger: Trigger::HeartbeatMiss { threshold: 3 },
-            actions: vec![ReactiveAction::Log("Peer inativo".to_string())],
-        });
+        let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
+        engine
+            .add_rule(ReactiveRule {
+                trigger: Trigger::HeartbeatMiss { threshold: 3 },
+                actions: vec![ReactiveAction::Log("Peer inativo".to_string())],
+            })
+            .unwrap();
 
         let event = NetworkEvent::HeartbeatMiss { count: 2 };
         let result = engine.evaluate(&event);
@@ -191,11 +245,13 @@ mod tests {
 
     #[test]
     fn reputation_below_triggers() {
-        let mut engine = ReactiveEngine::new();
-        engine.add_rule(ReactiveRule {
-            trigger: Trigger::ReputationBelow { threshold: 0.3 },
-            actions: vec![ReactiveAction::Emit("alert".to_string())],
-        });
+        let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
+        engine
+            .add_rule(ReactiveRule {
+                trigger: Trigger::ReputationBelow { threshold: 0.3 },
+                actions: vec![ReactiveAction::Emit("alert".to_string())],
+            })
+            .unwrap();
 
         let event = NetworkEvent::ReputationBelow { value: 0.2 };
         let result = engine.evaluate(&event);
@@ -206,15 +262,19 @@ mod tests {
 
     #[test]
     fn multiple_rules_same_event() {
-        let mut engine = ReactiveEngine::new();
-        engine.add_rule(ReactiveRule {
-            trigger: Trigger::HeartbeatMiss { threshold: 3 },
-            actions: vec![ReactiveAction::Log("Log 1".to_string())],
-        });
-        engine.add_rule(ReactiveRule {
-            trigger: Trigger::HeartbeatMiss { threshold: 5 },
-            actions: vec![ReactiveAction::Log("Log 2".to_string())],
-        });
+        let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
+        engine
+            .add_rule(ReactiveRule {
+                trigger: Trigger::HeartbeatMiss { threshold: 3 },
+                actions: vec![ReactiveAction::Log("Log 1".to_string())],
+            })
+            .unwrap();
+        engine
+            .add_rule(ReactiveRule {
+                trigger: Trigger::HeartbeatMiss { threshold: 5 },
+                actions: vec![ReactiveAction::Log("Log 2".to_string())],
+            })
+            .unwrap();
 
         let event = NetworkEvent::HeartbeatMiss { count: 6 };
         let result = engine.evaluate(&event);
@@ -225,13 +285,15 @@ mod tests {
 
     #[test]
     fn mark_inactive_action() {
-        let mut engine = ReactiveEngine::new();
-        engine.add_rule(ReactiveRule {
-            trigger: Trigger::HeartbeatMiss { threshold: 3 },
-            actions: vec![ReactiveAction::MarkInactive {
-                peer: "node_a".to_string(),
-            }],
-        });
+        let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
+        engine
+            .add_rule(ReactiveRule {
+                trigger: Trigger::HeartbeatMiss { threshold: 3 },
+                actions: vec![ReactiveAction::MarkInactive {
+                    peer: "node_a".to_string(),
+                }],
+            })
+            .unwrap();
 
         let event = NetworkEvent::HeartbeatMiss { count: 4 };
         let result = engine.evaluate(&event);
@@ -246,14 +308,16 @@ mod tests {
 
     #[test]
     fn adjust_reputation_action() {
-        let mut engine = ReactiveEngine::new();
-        engine.add_rule(ReactiveRule {
-            trigger: Trigger::ReputationBelow { threshold: 0.3 },
-            actions: vec![ReactiveAction::AdjustReputation {
-                peer: "node_b".to_string(),
-                delta: -20,
-            }],
-        });
+        let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
+        engine
+            .add_rule(ReactiveRule {
+                trigger: Trigger::ReputationBelow { threshold: 0.3 },
+                actions: vec![ReactiveAction::AdjustReputation {
+                    peer: "node_b".to_string(),
+                    delta: -20,
+                }],
+            })
+            .unwrap();
 
         let event = NetworkEvent::ReputationBelow { value: 0.2 };
         let result = engine.evaluate(&event);
@@ -268,16 +332,29 @@ mod tests {
 
     #[test]
     fn no_matching_rules() {
-        let mut engine = ReactiveEngine::new();
-        engine.add_rule(ReactiveRule {
-            trigger: Trigger::PeerConnected,
-            actions: vec![ReactiveAction::Log("Connected".to_string())],
-        });
+        let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
+        engine
+            .add_rule(ReactiveRule {
+                trigger: Trigger::PeerConnected,
+                actions: vec![ReactiveAction::Log("Connected".to_string())],
+            })
+            .unwrap();
 
         let event = NetworkEvent::HeartbeatMiss { count: 5 };
         let result = engine.evaluate(&event);
 
         assert!(!result.matched);
         assert!(result.actions.is_empty());
+    }
+
+    #[test]
+    fn add_rule_fails_on_basic_layer() {
+        let mut engine = ReactiveEngine::with_layer(NexLayer::Basic);
+        let result = engine.add_rule(ReactiveRule {
+            trigger: Trigger::HeartbeatMiss { threshold: 3 },
+            actions: vec![ReactiveAction::Log("test".to_string())],
+        });
+
+        assert!(result.is_err());
     }
 }

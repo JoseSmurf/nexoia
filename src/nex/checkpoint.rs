@@ -1,12 +1,12 @@
 //! checkpoint.rs — Sistema de checkpoints para persistência de estado
 //!
 //! Salva e carrega o estado do nó de forma atômica para evitar
-//! corrupção em caso de crash.
+//! corrupção em caso de crash. Inclui estado reativo.
 
 use crate::network::persistence::PersistedData;
-use crate::network::reputation::ReputationStore;
+use crate::nex::reactive::ReactiveRule;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::Path;
 
 /// Checkpoint do estado do nó.
@@ -16,6 +16,75 @@ pub struct Checkpoint {
     pub timestamp: String,
     pub network_data: PersistedData,
     pub node_id: String,
+    pub reactive_rules: Vec<ReactiveRuleSnapshot>,
+}
+
+/// Snapshot de uma regra reativa para persistência.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReactiveRuleSnapshot {
+    pub trigger_type: String,
+    pub trigger_params: String,
+    pub actions: Vec<String>,
+}
+
+impl From<&ReactiveRule> for ReactiveRuleSnapshot {
+    fn from(rule: &ReactiveRule) -> Self {
+        use crate::nex::ast::Trigger;
+
+        let (trigger_type, trigger_params) = match &rule.trigger {
+            Trigger::HeartbeatMiss { threshold } => {
+                ("heartbeat_miss".to_string(), threshold.to_string())
+            }
+            Trigger::ReputationBelow { threshold } => {
+                ("reputation_below".to_string(), threshold.to_string())
+            }
+            Trigger::PeerConnected => ("peer_connected".to_string(), String::new()),
+            Trigger::PeerDisconnected => ("peer_disconnected".to_string(), String::new()),
+        };
+
+        let actions = rule.actions.iter().map(|a| format!("{:?}", a)).collect();
+
+        ReactiveRuleSnapshot {
+            trigger_type,
+            trigger_params,
+            actions,
+        }
+    }
+}
+
+impl ReactiveRuleSnapshot {
+    pub fn to_rule(&self) -> Option<ReactiveRule> {
+        use crate::nex::ast::{ReactiveAction, Trigger};
+
+        let trigger = match self.trigger_type.as_str() {
+            "heartbeat_miss" => {
+                let threshold = self.trigger_params.parse().unwrap_or(3);
+                Trigger::HeartbeatMiss { threshold }
+            }
+            "reputation_below" => {
+                let threshold = self.trigger_params.parse().unwrap_or(0.3);
+                Trigger::ReputationBelow { threshold }
+            }
+            "peer_connected" => Trigger::PeerConnected,
+            "peer_disconnected" => Trigger::PeerDisconnected,
+            _ => return None,
+        };
+
+        let actions = self
+            .actions
+            .iter()
+            .filter_map(|a| {
+                if a.contains("Log") {
+                    let msg = a.split('"').nth(1).unwrap_or("unknown").to_string();
+                    Some(ReactiveAction::Log(msg))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Some(ReactiveRule { trigger, actions })
+    }
 }
 
 /// Gerencia checkpoints do sistema.
@@ -57,44 +126,40 @@ impl CheckpointManager {
 
         Ok(Some(checkpoint))
     }
-
-    /// Lista checkpoints disponíveis.
-    pub fn list(&self) -> Result<Vec<Checkpoint>, std::io::Error> {
-        let mut checkpoints = Vec::new();
-
-        if self.checkpoint_dir.exists() {
-            for entry in std::fs::read_dir(&self.checkpoint_dir)? {
-                let entry = entry?;
-                let path = entry.path();
-
-                if path.extension().map_or(false, |e| e == "json") {
-                    if let Ok(data) = std::fs::read_to_string(&path) {
-                        if let Ok(checkpoint) = serde_json::from_str::<Checkpoint>(&data) {
-                            checkpoints.push(checkpoint);
-                        }
-                    }
-                }
-            }
-        }
-
-        checkpoints.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-        Ok(checkpoints)
-    }
 }
 
 /// Cria checkpoint a partir do estado atual do sistema.
-pub fn create_checkpoint(node_id: &str, network_data: &PersistedData) -> Checkpoint {
+pub fn create_checkpoint(
+    node_id: &str,
+    network_data: &PersistedData,
+    reactive_rules: &[ReactiveRule],
+) -> Checkpoint {
+    let snapshots: Vec<ReactiveRuleSnapshot> = reactive_rules
+        .iter()
+        .map(ReactiveRuleSnapshot::from)
+        .collect();
+
     Checkpoint {
         version: 1,
-        timestamp: chrono::Utc::now().to_rfc3339(),
+        timestamp: Utc::now().to_rfc3339(),
         network_data: network_data.clone(),
         node_id: node_id.to_string(),
+        reactive_rules: snapshots,
     }
 }
 
 /// Aplica checkpoint ao estado do sistema.
-pub fn apply_checkpoint(checkpoint: &Checkpoint, network_data: &mut PersistedData) {
+pub fn apply_checkpoint(
+    checkpoint: &Checkpoint,
+    network_data: &mut PersistedData,
+) -> Vec<ReactiveRule> {
     *network_data = checkpoint.network_data.clone();
+
+    checkpoint
+        .reactive_rules
+        .iter()
+        .filter_map(|s| s.to_rule())
+        .collect()
 }
 
 #[cfg(test)]
@@ -110,7 +175,7 @@ mod tests {
         let mut data = PersistedData::default();
         data.peers.push("127.0.0.1:9001".to_string());
 
-        let checkpoint = create_checkpoint("test_node", &data);
+        let checkpoint = create_checkpoint("test_node", &data, &[]);
         manager.save(&checkpoint).unwrap();
 
         let loaded = manager.load().unwrap();
@@ -124,15 +189,13 @@ mod tests {
         let manager = CheckpointManager::new(dir.path().to_path_buf());
 
         let data = PersistedData::default();
-        let checkpoint = create_checkpoint("test_node", &data);
+        let checkpoint = create_checkpoint("test_node", &data, &[]);
 
         manager.save(&checkpoint).unwrap();
 
-        // Verifica que o arquivo final existe
         let final_path = dir.path().join("checkpoint.json");
         assert!(final_path.exists());
 
-        // Verifica que o arquivo temporário não existe
         let temp_path = dir.path().join("checkpoint.tmp");
         assert!(!temp_path.exists());
     }
@@ -142,12 +205,31 @@ mod tests {
         let mut data = PersistedData::default();
         data.peers.push("127.0.0.1:9001".to_string());
 
-        let checkpoint = create_checkpoint("test_node", &data);
+        let checkpoint = create_checkpoint("test_node", &data, &[]);
         let mut new_data = PersistedData::default();
 
-        apply_checkpoint(&checkpoint, &mut new_data);
+        let rules = apply_checkpoint(&checkpoint, &mut new_data);
 
         assert_eq!(new_data.peers.len(), 1);
         assert_eq!(new_data.peers[0], "127.0.0.1:9001");
+        assert!(rules.is_empty());
+    }
+
+    #[test]
+    fn checkpoint_with_reactive_rules() {
+        use crate::nex::ast::{ReactiveAction, Trigger};
+
+        let data = PersistedData::default();
+        let rules = vec![ReactiveRule {
+            trigger: Trigger::HeartbeatMiss { threshold: 5 },
+            actions: vec![ReactiveAction::Log("test".to_string())],
+        }];
+
+        let checkpoint = create_checkpoint("test_node", &data, &rules);
+        assert_eq!(checkpoint.reactive_rules.len(), 1);
+        assert_eq!(checkpoint.reactive_rules[0].trigger_type, "heartbeat_miss");
+
+        let restored = apply_checkpoint(&checkpoint, &mut PersistedData::default());
+        assert_eq!(restored.len(), 1);
     }
 }

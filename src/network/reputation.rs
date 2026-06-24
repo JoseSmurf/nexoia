@@ -1,3 +1,4 @@
+use crate::limits::MAX_REPUTATION_ENTRIES;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -111,7 +112,20 @@ impl ReputationStore {
     }
 
     /// Obtém ou cria reputação para um nó.
+    /// Evicts the entry with lowest success count when at capacity.
     pub fn get_or_create(&mut self, node_id: &str) -> &mut NodeReputation {
+        if !self.reputations.contains_key(node_id)
+            && self.reputations.len() >= MAX_REPUTATION_ENTRIES
+        {
+            if let Some((evict_id, _)) = self.reputations.iter().min_by_key(|(_, r)| r.successes) {
+                let evict_id = evict_id.clone();
+                eprintln!(
+                    "ReputationStore: evicting node {} (successes={}) to make room",
+                    evict_id, self.reputations[&evict_id].successes
+                );
+                self.reputations.remove(&evict_id);
+            }
+        }
         self.reputations
             .entry(node_id.to_string())
             .or_insert_with(|| NodeReputation::new(node_id.to_string()))

@@ -2,6 +2,7 @@
 //!
 //! Gerencia o estado de conexão entre nós e chaves de sessão derivadas.
 
+use crate::limits::MAX_SESSIONS;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -184,9 +185,32 @@ impl SessionManager {
     }
 
     /// Registra uma nova sessão após handshake completo.
+    /// Evicts the session with oldest last_activity if at capacity.
     pub async fn insert(&self, addr: SocketAddr, session: SessionState) {
         let mut sessions = self.sessions.write().await;
+        if sessions.len() >= MAX_SESSIONS {
+            // Evict session with oldest last_activity
+            if let Some((evict_addr, _)) = sessions.iter().min_by_key(|(_, s)| {
+                s.last_activity
+                    .lock()
+                    .map(|ts| *ts)
+                    .unwrap_or_else(|e| *e.into_inner())
+            }) {
+                let evict_addr = *evict_addr;
+                eprintln!(
+                    "SessionManager: evicting session with oldest activity ({}) to make room",
+                    evict_addr
+                );
+                sessions.remove(&evict_addr);
+            }
+        }
         sessions.insert(addr, session);
+    }
+
+    /// Returns the number of active sessions.
+    pub async fn session_count(&self) -> usize {
+        let sessions = self.sessions.read().await;
+        sessions.len()
     }
 
     /// Obtém a sessão de um peer.

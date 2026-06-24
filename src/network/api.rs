@@ -1,3 +1,4 @@
+use crate::limits::MAX_EPA_ENTRIES;
 use crate::network::epa::SharedEPA;
 use crate::network::verify::{verify_epa, VerifyResult};
 use axum::{
@@ -165,6 +166,10 @@ async fn receive_epa(
     match result {
         VerifyResult::Valid => {
             let mut epas = state.epas.write().await;
+            if epas.len() >= MAX_EPA_ENTRIES {
+                // Evict oldest (first element)
+                epas.remove(0);
+            }
             epas.push(epa);
             Ok(Json(ApiResponse {
                 status: "accepted".to_string(),

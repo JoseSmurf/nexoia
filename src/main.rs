@@ -4,6 +4,7 @@ mod defense;
 mod evidence;
 mod explain;
 mod hash;
+mod limits;
 mod network;
 mod nex;
 mod provenance;
@@ -13,6 +14,7 @@ mod types;
 
 use crate::decision::{DecisionRecord, DecisionStatus};
 use crate::hash::canonical_hash;
+use crate::limits::{MAX_EPA_ENTRIES, MAX_PENDING_HANDSHAKES};
 use crate::network::api::{self, ApiState};
 use crate::network::epa::SharedEPA;
 use crate::network::handshake::{HandshakePhase, PendingHandshake};
@@ -40,6 +42,20 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 use x25519_dalek::EphemeralSecret;
+
+// ╔══════════════════════════════════════════════════════╗
+// ║               GLOBAL LOCK ORDER                     ║
+// ║                                                      ║
+// ║  When acquiring multiple locks simultaneously,       ║
+// ║  ALWAYS acquire in this order:                       ║
+// ║                                                      ║
+// ║    1. sessions (SessionManager)                      ║
+// ║    2. peers    (PeerList / TrustedPeerList)          ║
+// ║    3. reputation (ReputationStore)                   ║
+// ║                                                      ║
+// ║  Acquiring in reverse order causes deadlock.         ║
+// ║  No exceptions.                                      ║
+// ╚══════════════════════════════════════════════════════╝
 
 #[derive(Debug, Clone, Serialize)]
 struct ArtifactSummary {
@@ -238,6 +254,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             hs.remote_nonce = Some(nonce);
             {
                 let mut pending = pending_handshakes.write().await;
+                if pending.len() >= MAX_PENDING_HANDSHAKES {
+                    eprintln!(
+                        "MAX_PENDING_HANDSHAKES ({}) reached — rejecting handshake from {}",
+                        MAX_PENDING_HANDSHAKES, peer_addr
+                    );
+                    continue;
+                }
                 pending.insert(*peer_addr, hs);
             }
 
@@ -457,6 +480,14 @@ async fn run_pipeline(
 
     {
         let mut epa_list = epas.write().await;
+        if epa_list.len() >= MAX_EPA_ENTRIES {
+            // Evict oldest (first element)
+            let evicted = epa_list.remove(0);
+            eprintln!(
+                "EPA list: evicting oldest EPA to make room (max={})",
+                MAX_EPA_ENTRIES
+            );
+        }
         epa_list.push(epa.clone());
     }
 
@@ -478,14 +509,24 @@ async fn save_network_state(
     epas: &Arc<RwLock<Vec<SharedEPA>>>,
     trusted_peers: &Arc<RwLock<TrustedPeerList>>,
 ) {
-    let peer_list = peers.read().await;
-    let epa_list = epas.read().await;
-    let trusted_list = trusted_peers.read().await;
+    // Lock order: peers → epas → trusted_peers (all read-only, minimize scope)
+    let peer_addrs = {
+        let peer_list = peers.read().await;
+        persistence::format_peers(peer_list.peers())
+    };
+    let epa_list = {
+        let epa_list = epas.read().await;
+        epa_list.clone()
+    };
+    let trusted_persisted = {
+        let trusted_list = trusted_peers.read().await;
+        persistence::trusted_to_persisted(&trusted_list)
+    };
 
     let data = PersistedData {
-        peers: persistence::format_peers(peer_list.peers()),
-        epas: epa_list.clone(),
-        trusted_peers: persistence::trusted_to_persisted(&trusted_list),
+        peers: peer_addrs,
+        epas: epa_list,
+        trusted_peers: trusted_persisted,
     };
 
     if let Err(e) = persistence::save_data(data_path, &data) {
@@ -546,6 +587,13 @@ async fn run_udp_listener(
                     // Salva handshake pendente
                     {
                         let mut pending = pending_handshakes.write().await;
+                        if pending.len() >= MAX_PENDING_HANDSHAKES {
+                            eprintln!(
+                                "MAX_PENDING_HANDSHAKES ({}) reached — rejecting handshake from {}",
+                                MAX_PENDING_HANDSHAKES, addr
+                            );
+                            continue;
+                        }
                         pending.insert(addr, hs);
                     }
 
@@ -732,30 +780,34 @@ async fn run_udp_listener(
                 } => {
                     println!("Handshake: SessionKeyExchange from {}", addr);
 
-                    // MEM-2 FIX: Usa bloco labelado para garantir cleanup em falhas
-                    let result: Result<(), String> = 'hs: {
+                    // Step 1: Compute session key while holding pending, then release
+                    let pending_result: Option<(
+                        [u8; 32],
+                        String,
+                        String,
+                        [u8; 32],
+                        [u8; 32],
+                        [u8; 32],
+                    )> = {
                         let mut pending = pending_handshakes.write().await;
                         let hs = match pending.get_mut(&addr) {
                             Some(hs) => hs,
                             None => {
                                 eprintln!("  ✗ No pending handshake for {}", addr);
-                                break 'hs Ok(());
+                                drop(pending);
+                                return;
                             }
                         };
 
                         // 1. Desencapsula ML-KEM
                         let ml_kem_shared =
-                            match node.ml_kem_keypair.decapsulate(&ml_kem_ciphertext) {
-                                Ok(shared) => shared,
-                                Err(e) => {
-                                    break 'hs Err(format!("ML-KEM decapsulation failed: {}", e));
-                                }
-                            };
-                        hs.ml_kem_shared = Some(ml_kem_shared);
+                            node.ml_kem_keypair.decapsulate(&ml_kem_ciphertext).ok();
 
                         // 2. DH com chave efêmera do respondedor
                         if responder_ephemeral_pub.len() != 32 {
-                            break 'hs Err("Invalid responder ephemeral x25519 pubkey".to_string());
+                            eprintln!("  ✗ Invalid responder ephemeral x25519 pubkey length");
+                            drop(pending);
+                            return;
                         }
                         let mut responder_pub_arr = [0u8; 32];
                         responder_pub_arr.copy_from_slice(&responder_ephemeral_pub);
@@ -763,16 +815,19 @@ async fn run_udp_listener(
                         let ephemeral_secret = match hs.ephemeral_secret.take() {
                             Some(s) => s,
                             None => {
-                                break 'hs Err("Missing local ephemeral secret".to_string());
+                                eprintln!("  ✗ Missing local ephemeral secret");
+                                drop(pending);
+                                return;
                             }
                         };
                         let x25519_shared = ephemeral_secret
                             .diffie_hellman(&x25519_dalek::PublicKey::from(responder_pub_arr));
 
                         // 3. Deriva chave de sessão híbrida
+                        let ml_kem_bytes = ml_kem_shared.unwrap_or([0u8; 32]);
                         let session_key = crate::network::crypto::derive_hybrid_session_key(
                             x25519_shared.as_bytes(),
-                            &ml_kem_shared,
+                            &ml_kem_bytes,
                             &hs.local_nonce,
                             &hs.remote_nonce.unwrap_or([0u8; 32]),
                         );
@@ -788,17 +843,43 @@ async fn run_udp_listener(
                             .encrypt(confirm_nonce, b"OK" as &[u8])
                             .unwrap_or_default();
 
-                        // Envia SessionKeyConfirm
-                        let confirm = NetworkMessage::SessionKeyConfirm { encrypted_ok };
-                        let _ = transport.send(&confirm, addr).await;
-
-                        // Adiciona como peer confiável
+                        // Extract data for post-lock phase
                         let remote_nonce = hs.remote_nonce.unwrap_or([0u8; 32]);
                         let peer_x25519 = hs.remote_x25519_pubkey.unwrap_or([0u8; 32]);
+                        let node_id = hs.remote_node_id.clone().unwrap_or_default();
+                        let pub_key = hs.remote_ed25519_pubkey.clone().unwrap_or_default();
+                        let local_nonce = hs.local_nonce;
+                        hs.phase = HandshakePhase::Complete;
+
+                        // Send confirm BEFORE releasing lock (transport borrows self)
+                        let confirm = NetworkMessage::SessionKeyConfirm { encrypted_ok };
+                        let _ = transport.send(&confirm, addr).await;
+                        println!("  → Sent SessionKeyConfirm to {}", addr);
+
+                        Some((
+                            session_key,
+                            node_id,
+                            pub_key,
+                            peer_x25519,
+                            local_nonce,
+                            remote_nonce,
+                        ))
+                    };
+
+                    // Step 2: Acquire trusted_peers and session_manager AFTER pending is released
+                    if let Some((
+                        session_key,
+                        node_id,
+                        pub_key,
+                        peer_x25519,
+                        local_nonce,
+                        remote_nonce,
+                    )) = pending_result
+                    {
                         let mut trusted = trusted_peers.write().await;
                         let peer = TrustedPeer {
-                            node_id: hs.remote_node_id.clone().unwrap_or_default(),
-                            public_key: hs.remote_ed25519_pubkey.clone().unwrap_or_default(),
+                            node_id,
+                            public_key: pub_key,
                             encryption_public_key: peer_x25519,
                             addr,
                             authenticated_at: chrono::Utc::now(),
@@ -806,25 +887,11 @@ async fn run_udp_listener(
 
                         if trusted.add(peer) {
                             println!("  ✓ Peer {} authenticated and added to trusted list", addr);
-                            let session =
-                                SessionState::new(session_key, hs.local_nonce, remote_nonce);
+                            let session = SessionState::new(session_key, local_nonce, remote_nonce);
                             session_manager.insert(addr, session).await;
                         } else {
                             eprintln!("  ✗ Failed to add peer {} (list full?)", addr);
                         }
-
-                        hs.phase = HandshakePhase::Complete;
-                        Ok(())
-                    };
-
-                    // MEM-2 FIX: Remove pending handshake em caso de falha
-                    if let Err(e) = result {
-                        eprintln!("  ✗ SessionKeyExchange failed from {}: {}", addr, e);
-                        let mut pending = pending_handshakes.write().await;
-                        pending.remove(&addr);
-                    } else {
-                        let mut pending = pending_handshakes.write().await;
-                        pending.remove(&addr);
                     }
                 }
 
@@ -832,72 +899,102 @@ async fn run_udp_listener(
                 NetworkMessage::SessionKeyConfirm { encrypted_ok } => {
                     println!("Handshake: SessionKeyConfirm from {}", addr);
 
-                    // Busca handshake pendente
-                    let mut pending = pending_handshakes.write().await;
-                    let hs = pending.get_mut(&addr);
-                    if hs.is_none() {
-                        eprintln!("  ✗ No pending handshake for {}", addr);
-                        continue;
-                    }
-                    let hs = hs.unwrap();
-
-                    // Recupera chave de sessão derivada na fase anterior
-                    let session_key = match hs.session_key {
-                        Some(s) => s,
-                        None => {
-                            eprintln!(
-                                "  ✗ Missing session key (SessionKeyExchange not processed?)"
-                            );
-                            continue;
-                        }
-                    };
-
-                    let peer_x25519 = hs.remote_x25519_pubkey.unwrap_or([0u8; 32]);
-                    let remote_nonce = hs.remote_nonce.unwrap_or([0u8; 32]);
-
-                    // Verifica que "OK" foi descriptografado corretamente
-                    use chacha20poly1305::{
-                        aead::{Aead, KeyInit},
-                        ChaCha20Poly1305, Nonce,
-                    };
-                    let cipher = ChaCha20Poly1305::new(&session_key.into());
-                    let confirm_nonce = Nonce::from_slice(&[0u8; 12]);
-                    let decrypted = cipher.decrypt(confirm_nonce, encrypted_ok.as_ref());
-
-                    match decrypted {
-                        Ok(msg) if msg == b"OK" => {
-                            println!("  ✓ Session key verified with {}", addr);
-
-                            // Adiciona como peer confiável
-                            let mut trusted = trusted_peers.write().await;
-                            let peer = TrustedPeer {
-                                node_id: hs.remote_node_id.clone().unwrap_or_default(),
-                                public_key: hs.remote_ed25519_pubkey.clone().unwrap_or_default(),
-                                encryption_public_key: peer_x25519,
-                                addr,
-                                authenticated_at: chrono::Utc::now(),
-                            };
-
-                            if trusted.add(peer) {
-                                println!("  ✓ Peer {} added to trusted list", addr);
-
-                                // Salva sessão
-                                let session =
-                                    SessionState::new(session_key, hs.local_nonce, remote_nonce);
-                                session_manager.insert(addr, session).await;
+                    // Step 1: Extract data from pending, verify OK, release lock
+                    let confirm_result: Option<(
+                        [u8; 32],
+                        String,
+                        String,
+                        [u8; 32],
+                        [u8; 32],
+                        [u8; 32],
+                    )> = {
+                        let mut pending = pending_handshakes.write().await;
+                        let hs = match pending.get_mut(&addr) {
+                            Some(hs) => hs,
+                            None => {
+                                eprintln!("  ✗ No pending handshake for {}", addr);
+                                drop(pending);
+                                return;
                             }
+                        };
 
-                            hs.phase = HandshakePhase::Complete;
+                        let session_key = match hs.session_key {
+                            Some(s) => s,
+                            None => {
+                                eprintln!(
+                                    "  ✗ Missing session key (SessionKeyExchange not processed?)"
+                                );
+                                drop(pending);
+                                return;
+                            }
+                        };
+
+                        let peer_x25519 = hs.remote_x25519_pubkey.unwrap_or([0u8; 32]);
+                        let remote_nonce = hs.remote_nonce.unwrap_or([0u8; 32]);
+
+                        // Verifica que "OK" foi descriptografado corretamente
+                        use chacha20poly1305::{
+                            aead::{Aead, KeyInit},
+                            ChaCha20Poly1305, Nonce,
+                        };
+                        let cipher = ChaCha20Poly1305::new(&session_key.into());
+                        let confirm_nonce = Nonce::from_slice(&[0u8; 12]);
+                        let decrypted = cipher.decrypt(confirm_nonce, encrypted_ok.as_ref());
+
+                        match decrypted {
+                            Ok(msg) if msg == b"OK" => {
+                                println!("  ✓ Session key verified with {}", addr);
+
+                                let node_id = hs.remote_node_id.clone().unwrap_or_default();
+                                let pub_key = hs.remote_ed25519_pubkey.clone().unwrap_or_default();
+                                let local_nonce = hs.local_nonce;
+                                hs.phase = HandshakePhase::Complete;
+                                pending.remove(&addr);
+
+                                Some((
+                                    session_key,
+                                    node_id,
+                                    pub_key,
+                                    peer_x25519,
+                                    local_nonce,
+                                    remote_nonce,
+                                ))
+                            }
+                            _ => {
+                                eprintln!("  ✗ Session key verification failed from {}", addr);
+                                hs.phase =
+                                    HandshakePhase::Failed("Key verification failed".to_string());
+                                pending.remove(&addr);
+                                None
+                            }
                         }
-                        _ => {
-                            eprintln!("  ✗ Session key verification failed from {}", addr);
-                            hs.phase =
-                                HandshakePhase::Failed("Key verification failed".to_string());
+                    };
+
+                    // Step 2: Acquire trusted_peers and session_manager AFTER pending is released
+                    if let Some((
+                        session_key,
+                        node_id,
+                        pub_key,
+                        peer_x25519,
+                        local_nonce,
+                        remote_nonce,
+                    )) = confirm_result
+                    {
+                        let mut trusted = trusted_peers.write().await;
+                        let peer = TrustedPeer {
+                            node_id,
+                            public_key: pub_key,
+                            encryption_public_key: peer_x25519,
+                            addr,
+                            authenticated_at: chrono::Utc::now(),
+                        };
+
+                        if trusted.add(peer) {
+                            println!("  ✓ Peer {} added to trusted list", addr);
+                            let session = SessionState::new(session_key, local_nonce, remote_nonce);
+                            session_manager.insert(addr, session).await;
                         }
                     }
-
-                    // Remove handshake pendente
-                    pending.remove(&addr);
                 }
 
                 // ============================================
@@ -979,18 +1076,20 @@ async fn run_udp_listener(
 
                 // Heartbeat: Peer está vivo
                 NetworkMessage::Heartbeat { node_id, timestamp } => {
-                    // Verifica se tem sessão
+                    // Verifica se tem sessão (lock order: sessions first)
                     if !session_manager.contains(&addr).await {
                         eprintln!("  ✗ Heartbeat from unauthenticated peer {}", addr);
                         continue;
                     }
 
                     // Atualiza estado do peer
-                    let mut states = peer_states.write().await;
-                    if let Some(state) = states.get_mut(&addr) {
-                        state.record_heartbeat();
-                    } else {
-                        states.insert(addr, PeerState::new());
+                    {
+                        let mut states = peer_states.write().await;
+                        if let Some(state) = states.get_mut(&addr) {
+                            state.record_heartbeat();
+                        } else {
+                            states.insert(addr, PeerState::new());
+                        }
                     }
 
                     // Envia ack (encriptado se tiver sessão)
@@ -1043,42 +1142,53 @@ async fn run_udp_listener(
                         node_id,
                         peer_addrs.len()
                     );
-                    let mut peer_list = trusted_peers.write().await;
-                    for peer_addr_str in &peer_addrs {
-                        if let Ok(peer_addr) = peer_addr_str.parse::<SocketAddr>() {
-                            if peer_addr != addr && !peer_list.contains(&peer_addr) {
-                                // HAND-1 FIX: Store ephemeral secret in PendingHandshake
-                                // before sending Hello, so we can complete DH when
-                                // the remote peer responds with Challenge.
-                                let nonce = generate_handshake_nonce();
-                                let ephemeral_secret =
-                                    EphemeralSecret::random_from_rng(rand::rngs::OsRng);
-                                let ephemeral_public =
-                                    x25519_dalek::PublicKey::from(&ephemeral_secret);
 
-                                let local_nonce = generate_handshake_nonce();
-                                let mut hs = PendingHandshake::new_initiator(
-                                    peer_addr,
-                                    local_nonce,
-                                    ephemeral_secret,
+                    // Step 1: Check which peers are unknown (read-only, no lock held)
+                    let unknown_peers: Vec<SocketAddr> = {
+                        let peer_list = trusted_peers.read().await;
+                        peer_addrs
+                            .iter()
+                            .filter_map(|s| s.parse::<SocketAddr>().ok())
+                            .filter(|&peer_addr| {
+                                peer_addr != addr && !peer_list.contains(&peer_addr)
+                            })
+                            .collect()
+                    };
+
+                    // Step 2: Initiate handshakes (no trusted_peers lock held)
+                    for peer_addr in &unknown_peers {
+                        let nonce = generate_handshake_nonce();
+                        let ephemeral_secret = EphemeralSecret::random_from_rng(rand::rngs::OsRng);
+                        let ephemeral_public = x25519_dalek::PublicKey::from(&ephemeral_secret);
+
+                        let local_nonce = generate_handshake_nonce();
+                        let mut hs = PendingHandshake::new_initiator(
+                            *peer_addr,
+                            local_nonce,
+                            ephemeral_secret,
+                        );
+                        hs.remote_nonce = Some(nonce);
+                        {
+                            let mut pending = pending_handshakes.write().await;
+                            if pending.len() >= MAX_PENDING_HANDSHAKES {
+                                eprintln!(
+                                    "MAX_PENDING_HANDSHAKES ({}) reached — rejecting handshake from {}",
+                                    MAX_PENDING_HANDSHAKES, peer_addr
                                 );
-                                hs.remote_nonce = Some(nonce);
-                                {
-                                    let mut pending = pending_handshakes.write().await;
-                                    pending.insert(peer_addr, hs);
-                                }
-
-                                let hello = NetworkMessage::Hello {
-                                    node_id: node.node_id.clone(),
-                                    ed25519_pubkey: node.public_key.clone(),
-                                    x25519_pubkey: ephemeral_public.to_bytes().to_vec(),
-                                    ml_kem_ek: node.ml_kem_keypair.encapsulation_key.clone(),
-                                    nonce,
-                                };
-                                let _ = transport.send(&hello, peer_addr).await;
-                                println!("  → Initiating handshake with {}", peer_addr);
+                                continue;
                             }
+                            pending.insert(*peer_addr, hs);
                         }
+
+                        let hello = NetworkMessage::Hello {
+                            node_id: node.node_id.clone(),
+                            ed25519_pubkey: node.public_key.clone(),
+                            x25519_pubkey: ephemeral_public.to_bytes().to_vec(),
+                            ml_kem_ek: node.ml_kem_keypair.encapsulation_key.clone(),
+                            nonce,
+                        };
+                        let _ = transport.send(&hello, *peer_addr).await;
+                        println!("  → Initiating handshake with {}", peer_addr);
                     }
                 }
 
@@ -1160,8 +1270,13 @@ async fn verify_and_store_epa(
                 rep.save()
                     .unwrap_or_else(|e| eprintln!("Failed to save reputation: {}", e));
             }
-            let mut epa_list = epas.write().await;
-            epa_list.push(epa.clone());
+            {
+                let mut epa_list = epas.write().await;
+                if epa_list.len() >= MAX_EPA_ENTRIES {
+                    epa_list.remove(0);
+                }
+                epa_list.push(epa.clone());
+            }
             println!("✓ Received valid EPA: {}", epa);
             save_network_state(&data_path, &peers, &epas, &trusted_peers).await;
         }
@@ -1351,21 +1466,30 @@ async fn run_heartbeat_monitor(
         for event in &events {
             let result = reactive_engine.evaluate(event);
             if result.matched {
-                let mut peer_states_mut = peer_states.write().await;
-                let mut rep = reputation.write().await;
-                let _report = ActionExecutor::execute(
-                    &result.actions,
-                    &mut peer_states_mut,
-                    &mut rep,
-                    &peer_addrs_map,
-                );
+                // Lock order: peer_states → reputation
+                // Collect actions first, then apply
+                let actions = {
+                    let mut peer_states_mut = peer_states.write().await;
+                    let mut rep = reputation.write().await;
+                    let report = ActionExecutor::execute(
+                        &result.actions,
+                        &mut peer_states_mut,
+                        &mut rep,
+                        &peer_addrs_map,
+                    );
+                    drop(rep);
+                    drop(peer_states_mut);
+                    report
+                };
+                let _ = actions;
             }
         }
 
         // Remove peers inativos
+        // Lock order: peer_states → trusted_peers
         if !to_remove.is_empty() {
-            let mut peers = trusted_peers.write().await;
             let mut states = peer_states.write().await;
+            let mut peers = trusted_peers.write().await;
             for addr in &to_remove {
                 peers.remove(addr);
                 states.remove(addr);

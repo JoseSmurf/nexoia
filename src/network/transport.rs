@@ -172,7 +172,18 @@ impl TrustedPeerList {
             return false;
         }
         if self.peers.len() >= self.max_peers {
-            return false;
+            // Evict oldest peer (by authenticated_at timestamp)
+            if let Some((evict_addr, _)) = self.peers.iter().min_by_key(|(_, p)| p.authenticated_at)
+            {
+                let evict_addr = *evict_addr;
+                eprintln!(
+                    "TrustedPeerList: evicting oldest peer {} to make room",
+                    evict_addr
+                );
+                self.peers.remove(&evict_addr);
+            } else {
+                return false;
+            }
         }
         self.peers.insert(peer.addr, peer);
         true
@@ -329,7 +340,13 @@ impl PeerList {
             return false;
         }
         if self.peers.len() >= self.max_peers {
-            return false;
+            // Evict oldest peer (first in list = oldest)
+            if !self.peers.is_empty() {
+                let evicted = self.peers.remove(0);
+                eprintln!("PeerList: evicting oldest peer {} to make room", evicted);
+            } else {
+                return false;
+            }
         }
         self.peers.push(addr);
         true
@@ -388,8 +405,11 @@ mod tests {
 
         assert!(list.add(addr1));
         assert!(list.add(addr2));
-        assert!(!list.add(addr3));
+        // Evicts oldest (addr1), then adds addr3
+        assert!(list.add(addr3));
         assert_eq!(list.len(), 2);
+        assert!(!list.contains(&addr1));
+        assert!(list.contains(&addr3));
     }
 
     #[test]

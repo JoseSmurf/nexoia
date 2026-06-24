@@ -26,6 +26,10 @@ pub struct SharedEPA {
     pub integrity_hash: String,
     /// Payload encriptado (opcional). Formato: nonce (12 bytes) + ciphertext.
     pub encrypted_payload: Option<Vec<u8>>,
+    /// Chave pública efêmera X25519 usada na encriptação (obtida via ECDH).
+    /// Presente apenas quando `encrypted_payload` é Some.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ephemeral_public_key: Option<Vec<u8>>,
 }
 
 /// Resultado da verificação de EPA.
@@ -91,6 +95,7 @@ impl SharedEPA {
             timestamp: Utc::now().to_rfc3339(),
             integrity_hash,
             encrypted_payload: None,
+            ephemeral_public_key: None,
         }
     }
 
@@ -122,21 +127,30 @@ impl SharedEPA {
         let encrypted = crypto::encrypt(sensitive_data.as_bytes(), &cipher)?;
 
         epa.encrypted_payload = Some(encrypted);
+        epa.ephemeral_public_key = Some(keypair.public_bytes().to_vec());
         Ok(epa)
     }
 
     /// Decripta o payload usando chave privada do destinatário.
+    /// A chave pública efêmera é obtida do campo `ephemeral_public_key` do EPA.
     pub fn decrypt_payload(
         &self,
         recipient_keypair: &KeyPair,
-        sender_public_key: &[u8; 32],
     ) -> Result<String, String> {
         let encrypted = self
             .encrypted_payload
             .as_ref()
             .ok_or("No encrypted payload")?;
 
-        let cipher = recipient_keypair.derive_cipher(sender_public_key)?;
+        let ephemeral_pub = self
+            .ephemeral_public_key
+            .as_ref()
+            .ok_or("No ephemeral public key in EPA")?;
+
+        let mut key_arr = [0u8; 32];
+        key_arr.copy_from_slice(ephemeral_pub);
+
+        let cipher = recipient_keypair.derive_cipher(&key_arr)?;
         let decrypted = crypto::decrypt(encrypted, &cipher)?;
 
         String::from_utf8(decrypted).map_err(|e| format!("Invalid UTF-8: {}", e))

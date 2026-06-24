@@ -26,6 +26,7 @@ use crate::network::transport::{
 };
 use crate::network::verify::{verify_epa, VerifyResult};
 use crate::nex::action_executor::ActionExecutor;
+use crate::nex::layers::NexLayer;
 use crate::nex::reactive::{NetworkEvent, ReactiveEngine};
 use crate::state::State;
 use crate::types::EvidenceProvider;
@@ -266,28 +267,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let peer_states_monitor = Arc::clone(&peer_states);
     let trusted_monitor = Arc::clone(&trusted_peers);
     let reputation_monitor = Arc::clone(&reputation);
-    let mut reactive_engine = ReactiveEngine::new();
+    let mut reactive_engine = ReactiveEngine::with_layer(NexLayer::Advanced);
 
     // Adiciona regras reativas padrão
-    reactive_engine.add_rule(crate::nex::reactive::ReactiveRule {
+    let _ = reactive_engine.add_rule(crate::nex::reactive::ReactiveRule {
         trigger: crate::nex::ast::Trigger::HeartbeatMiss { threshold: 3 },
         actions: vec![crate::nex::ast::ReactiveAction::Log(
             "Peer possivelmente inativo".to_string(),
         )],
     });
-    reactive_engine.add_rule(crate::nex::reactive::ReactiveRule {
+    let _ = reactive_engine.add_rule(crate::nex::reactive::ReactiveRule {
         trigger: crate::nex::ast::Trigger::HeartbeatMiss { threshold: 5 },
         actions: vec![crate::nex::ast::ReactiveAction::MarkInactive {
             peer: "default".to_string(),
         }],
     });
 
+    let session_manager = Arc::new(SessionManager::new());
+
+    let session_manager_monitor = Arc::clone(&session_manager);
     tokio::spawn(async move {
         run_heartbeat_monitor(
             peer_states_monitor,
             trusted_monitor,
             reputation_monitor,
             reactive_engine,
+            session_manager_monitor,
         )
         .await;
     });
@@ -300,7 +305,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let peer_states_clone = Arc::clone(&peer_states);
     let data_path_clone = data_path.clone();
     let disable_encryption = config.disable_encryption;
-    let session_manager = Arc::new(SessionManager::new());
     let pending_handshakes = Arc::new(RwLock::new(HashMap::new()));
 
     tokio::spawn(async move {
@@ -1026,22 +1030,17 @@ async fn run_udp_listener(
 
                     // Descriptografa se necessário
                     if !disable_encryption && epa.encrypted_payload.is_some() {
-                        // Busca chave pública do remetente
-                        let sender_pubkey = trusted.get(&addr).map(|p| p.encryption_public_key);
-                        if let Some(sender_key) = sender_pubkey {
-                            match epa.decrypt_payload(&node.encryption_keypair, &sender_key) {
-                                Ok(decrypted) => {
-                                    println!("✓ EPA decrypted from {}", addr);
-                                    let _ = decrypted;
-                                }
-                                Err(e) => {
-                                    eprintln!(
-                                        "✗ EPA decryption failed from {}: {}",
-                                        addr, epa.node_id
-                                    );
-                                    increment_failure(&reputation, &epa.node_id).await;
-                                    continue;
-                                }
+                        match epa.decrypt_payload(&node.encryption_keypair) {
+                            Ok(_decrypted) => {
+                                println!("✓ EPA decrypted from {}", addr);
+                            }
+                            Err(_e) => {
+                                eprintln!(
+                                    "✗ EPA decryption failed from {} ({})",
+                                    addr, epa.node_id
+                                );
+                                increment_failure(&reputation, &epa.node_id).await;
+                                continue;
                             }
                         }
                     }
@@ -1231,11 +1230,15 @@ async fn run_heartbeat_monitor(
     trusted_peers: Arc<RwLock<TrustedPeerList>>,
     reputation: Arc<RwLock<ReputationStore>>,
     mut reactive_engine: ReactiveEngine,
+    session_manager: Arc<SessionManager>,
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(60));
 
     loop {
         interval.tick().await;
+
+        // Cleanup sessões expiradas (5 minutos sem atividade)
+        session_manager.cleanup(300).await;
 
         let states = peer_states.read().await;
         let mut to_remove = Vec::new();

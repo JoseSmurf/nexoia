@@ -279,7 +279,7 @@ impl Serialize for NodeIdentity {
             encryption_secret_bytes: self.encryption_keypair.secret_bytes().to_vec(),
             encryption_public_bytes: self.encryption_keypair.public_bytes().to_vec(),
             ml_kem_encapsulation_key_bytes: self.ml_kem_keypair.encapsulation_key.clone(),
-            ml_kem_decapsulation_key_bytes: vec![], // Decapsulation key is derived from encapsulation key
+            ml_kem_decapsulation_key_bytes: self.ml_kem_keypair.decapsulation_key_seed_bytes().to_vec(),
             encrypted_secret_key: None,
             encrypted_encryption_key: None,
             ml_kem_encapsulation_key: None,
@@ -331,7 +331,7 @@ impl<'de> Deserialize<'de> for NodeIdentity {
                 "Encrypted ML-KEM identity requires passphrase. Use load_or_create() instead.",
             ));
         } else if !saved.ml_kem_encapsulation_key_bytes.is_empty() {
-            MlKemKeyPair::from_bytes(&saved.ml_kem_encapsulation_key_bytes, &vec![])
+            MlKemKeyPair::from_bytes(&saved.ml_kem_encapsulation_key_bytes, &saved.ml_kem_decapsulation_key_bytes)
                 .map_err(|e| serde::de::Error::custom(format!("invalid ML-KEM key: {}", e)))?
         } else {
             MlKemKeyPair::generate()

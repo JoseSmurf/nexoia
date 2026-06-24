@@ -133,10 +133,7 @@ impl SharedEPA {
 
     /// Decripta o payload usando chave privada do destinatário.
     /// A chave pública efêmera é obtida do campo `ephemeral_public_key` do EPA.
-    pub fn decrypt_payload(
-        &self,
-        recipient_keypair: &KeyPair,
-    ) -> Result<String, String> {
+    pub fn decrypt_payload(&self, recipient_keypair: &KeyPair) -> Result<String, String> {
         let encrypted = self
             .encrypted_payload
             .as_ref()

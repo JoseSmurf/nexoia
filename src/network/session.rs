@@ -43,10 +43,7 @@ impl Clone for SessionState {
             nonce_local: self.nonce_local,
             nonce_remote: self.nonce_remote,
             last_activity: Mutex::new(
-                *self
-                    .last_activity
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner()),
+                *self.last_activity.lock().unwrap_or_else(|e| e.into_inner()),
             ),
         }
     }
@@ -224,7 +221,10 @@ impl SessionManager {
         sessions.retain(|addr, session| {
             let alive = !session.is_expired(timeout);
             if !alive {
-                eprintln!("Session expired for {} (no activity for {}s)", addr, timeout_secs);
+                eprintln!(
+                    "Session expired for {} (no activity for {}s)",
+                    addr, timeout_secs
+                );
             }
             alive
         });

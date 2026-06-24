@@ -11,6 +11,7 @@ chrono = { version = "0.4", features = ["serde", "clock"] }
 ed25519-dalek = { version = "2", features = ["serde"] }
 hex = "0.4"
 hkdf = "0.12"
+ml-kem = { version = "0.3", features = ["alloc", "getrandom"] }
 pbkdf2 = { version = "0.12", features = ["hmac"] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }

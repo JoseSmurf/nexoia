@@ -1,5 +1,5 @@
 use crate::hash::canonical_hash;
-use crate::network::crypto::KeyPair;
+use crate::network::crypto::{KeyPair, MlKemKeyPair};
 use crate::network::crypto_key;
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
@@ -9,7 +9,7 @@ use std::fmt;
 use std::path::Path;
 
 /// Identidade do nó na rede P2P.
-/// Usa Ed25519 para assinatura e X25519 para encriptação.
+/// Usa Ed25519 para assinatura, X25519 para encriptação e ML-KEM-768 para proteção pós-quântica.
 #[derive(Clone)]
 pub struct NodeIdentity {
     pub node_id: String,
@@ -18,10 +18,12 @@ pub struct NodeIdentity {
     signing_key: SigningKey,
     /// Par de chaves X25519 para encriptação de payload
     pub encryption_keypair: KeyPair,
+    /// Par de chaves ML-KEM-768 para proteção pós-quântica
+    pub ml_kem_keypair: MlKemKeyPair,
 }
 
 impl NodeIdentity {
-    /// Gera nova identidade com chaves Ed25519 e X25519 aleatórias.
+    /// Gera nova identidade com chaves Ed25519, X25519 e ML-KEM-768.
     pub fn generate(name: &str) -> Self {
         let mut secret_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut secret_bytes);
@@ -35,12 +37,16 @@ impl NodeIdentity {
         // Gera par de chaves X25519 para encriptação
         let encryption_keypair = KeyPair::generate();
 
+        // Gera par de chaves ML-KEM-768 para proteção pós-quântica
+        let ml_kem_keypair = MlKemKeyPair::generate();
+
         Self {
             node_id,
             public_key,
             created_at: timestamp,
             signing_key,
             encryption_keypair,
+            ml_kem_keypair,
         }
     }
 
@@ -111,12 +117,43 @@ impl NodeIdentity {
                 KeyPair::generate()
             };
 
+            // Carrega par de chaves ML-KEM-768
+            let ml_kem_keypair = {
+                let ek_bytes = if let Some(encrypted) = &saved.ml_kem_encapsulation_key {
+                    let pass = passphrase.ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "Passphrase required to decrypt ML-KEM key",
+                        )
+                    })?;
+                    crypto_key::decrypt_with_passphrase(encrypted, pass)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
+                } else {
+                    saved.ml_kem_encapsulation_key_bytes.clone()
+                };
+                let dk_bytes = if let Some(encrypted) = &saved.ml_kem_decapsulation_key {
+                    let pass = passphrase.ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "Passphrase required to decrypt ML-KEM key",
+                        )
+                    })?;
+                    crypto_key::decrypt_with_passphrase(encrypted, pass)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
+                } else {
+                    saved.ml_kem_decapsulation_key_bytes.clone()
+                };
+                MlKemKeyPair::from_bytes(&ek_bytes, &dk_bytes)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
+            };
+
             Ok(Self {
                 node_id: saved.node_id,
                 public_key: saved.public_key,
                 created_at: saved.created_at,
                 signing_key,
                 encryption_keypair,
+                ml_kem_keypair,
             })
         } else {
             let identity = Self::generate(name);
@@ -133,38 +170,63 @@ impl NodeIdentity {
             std::fs::create_dir_all(parent)?;
         }
 
-        let (secret_key_bytes, encryption_secret_bytes, encrypted_secret, encrypted_encryption) =
-            if let Some(pass) = passphrase {
-                // Criptografa chaves com passphrase
-                let secret_encrypted =
-                    crypto_key::encrypt_with_passphrase(&self.signing_key.to_bytes(), pass)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let (
+            secret_key_bytes,
+            encryption_secret_bytes,
+            encrypted_secret,
+            encrypted_encryption,
+            ml_kem_encapsulation_key_bytes,
+            ml_kem_decapsulation_key_bytes,
+            encrypted_ml_kem_ek,
+            encrypted_ml_kem_dk,
+        ) = if let Some(pass) = passphrase {
+            // Criptografa chaves com passphrase
+            let secret_encrypted =
+                crypto_key::encrypt_with_passphrase(&self.signing_key.to_bytes(), pass)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-                let enc_key_encrypted = crypto_key::encrypt_with_passphrase(
-                    &self.encryption_keypair.secret_bytes(),
-                    pass,
-                )
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            let enc_key_encrypted =
+                crypto_key::encrypt_with_passphrase(&self.encryption_keypair.secret_bytes(), pass)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-                (
-                    vec![], // Texto puro vazio
-                    vec![],
-                    Some(secret_encrypted),
-                    Some(enc_key_encrypted),
-                )
-            } else {
-                // Sem passphrase — salva em texto puro com warning
-                eprintln!(
-                    "⚠ WARNING: Saving identity WITHOUT passphrase. \
-                     Set NEXOIA_PASSPHRASE to encrypt private keys."
-                );
-                (
-                    self.signing_key.to_bytes().to_vec(),
-                    self.encryption_keypair.secret_bytes().to_vec(),
-                    None,
-                    None,
-                )
-            };
+            // Criptografa chaves ML-KEM
+            let ml_kem_ek_encrypted =
+                crypto_key::encrypt_with_passphrase(&self.ml_kem_keypair.encapsulation_key, pass)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+            let ml_kem_dk_encrypted = crypto_key::encrypt_with_passphrase(
+                self.ml_kem_keypair.decapsulation_key_seed_bytes(),
+                pass,
+            )
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+            (
+                vec![], // Texto puro vazio
+                vec![],
+                Some(secret_encrypted),
+                Some(enc_key_encrypted),
+                vec![],
+                vec![],
+                Some(ml_kem_ek_encrypted),
+                Some(ml_kem_dk_encrypted),
+            )
+        } else {
+            // Sem passphrase — salva em texto puro com warning
+            eprintln!(
+                "⚠ WARNING: Saving identity WITHOUT passphrase. \
+                 Set NEXOIA_PASSPHRASE to encrypt private keys."
+            );
+            (
+                self.signing_key.to_bytes().to_vec(),
+                self.encryption_keypair.secret_bytes().to_vec(),
+                None,
+                None,
+                self.ml_kem_keypair.encapsulation_key.clone(),
+                self.ml_kem_keypair.decapsulation_key_seed_bytes().to_vec(),
+                None,
+                None,
+            )
+        };
 
         let saved = SavedIdentity {
             node_id: self.node_id.clone(),
@@ -175,6 +237,10 @@ impl NodeIdentity {
             encryption_public_bytes: self.encryption_keypair.public_bytes().to_vec(),
             encrypted_secret_key: encrypted_secret,
             encrypted_encryption_key: encrypted_encryption,
+            ml_kem_encapsulation_key_bytes,
+            ml_kem_decapsulation_key_bytes,
+            ml_kem_encapsulation_key: encrypted_ml_kem_ek,
+            ml_kem_decapsulation_key: encrypted_ml_kem_dk,
         };
 
         let data = serde_json::to_string_pretty(&saved)
@@ -212,8 +278,12 @@ impl Serialize for NodeIdentity {
             secret_key_bytes: self.signing_key.to_bytes().to_vec(),
             encryption_secret_bytes: self.encryption_keypair.secret_bytes().to_vec(),
             encryption_public_bytes: self.encryption_keypair.public_bytes().to_vec(),
+            ml_kem_encapsulation_key_bytes: self.ml_kem_keypair.encapsulation_key.clone(),
+            ml_kem_decapsulation_key_bytes: vec![], // Decapsulation key is derived from encapsulation key
             encrypted_secret_key: None,
             encrypted_encryption_key: None,
+            ml_kem_encapsulation_key: None,
+            ml_kem_decapsulation_key: None,
         };
         saved.serialize(serializer)
     }
@@ -253,12 +323,27 @@ impl<'de> Deserialize<'de> for NodeIdentity {
             KeyPair::generate()
         };
 
+        // Carrega par de chaves ML-KEM-768
+        let ml_kem_keypair = if saved.ml_kem_encapsulation_key.is_some()
+            || saved.ml_kem_decapsulation_key.is_some()
+        {
+            return Err(serde::de::Error::custom(
+                "Encrypted ML-KEM identity requires passphrase. Use load_or_create() instead.",
+            ));
+        } else if !saved.ml_kem_encapsulation_key_bytes.is_empty() {
+            MlKemKeyPair::from_bytes(&saved.ml_kem_encapsulation_key_bytes, &vec![])
+                .map_err(|e| serde::de::Error::custom(format!("invalid ML-KEM key: {}", e)))?
+        } else {
+            MlKemKeyPair::generate()
+        };
+
         Ok(Self {
             node_id: saved.node_id,
             public_key: saved.public_key,
             created_at: saved.created_at,
             signing_key,
             encryption_keypair,
+            ml_kem_keypair,
         })
     }
 }
@@ -272,9 +357,19 @@ struct SavedIdentity {
     secret_key_bytes: Vec<u8>,
     encryption_secret_bytes: Vec<u8>,
     encryption_public_bytes: Vec<u8>,
+    /// Chaves ML-KEM em texto puro (quando não há passphrase)
+    #[serde(default)]
+    ml_kem_encapsulation_key_bytes: Vec<u8>,
+    #[serde(default)]
+    ml_kem_decapsulation_key_bytes: Vec<u8>,
     /// Chaves criptografadas (quando há passphrase)
     encrypted_secret_key: Option<Vec<u8>>,
     encrypted_encryption_key: Option<Vec<u8>>,
+    /// Chaves ML-KEM criptografadas (quando há passphrase)
+    #[serde(default)]
+    ml_kem_encapsulation_key: Option<Vec<u8>>,
+    #[serde(default)]
+    ml_kem_decapsulation_key: Option<Vec<u8>>,
 }
 
 impl fmt::Display for NodeIdentity {

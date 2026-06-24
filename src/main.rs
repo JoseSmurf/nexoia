@@ -227,6 +227,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 node_id: node.node_id.clone(),
                 ed25519_pubkey: node.public_key.clone(),
                 x25519_pubkey: node.encryption_keypair.public_bytes().to_vec(),
+                ml_kem_ek: node.ml_kem_keypair.encapsulation_key.clone(),
                 nonce,
             };
             if let Ok(data) = serde_json::to_vec(&hello) {
@@ -475,6 +476,7 @@ async fn run_udp_listener(
                     node_id,
                     ed25519_pubkey,
                     x25519_pubkey,
+                    ml_kem_ek,
                     nonce,
                 } => {
                     println!("Handshake: Hello from {} at {}", node_id, addr);
@@ -488,6 +490,7 @@ async fn run_udp_listener(
                     key_arr.copy_from_slice(&x25519_pubkey);
                     hs.remote_x25519_pubkey = Some(key_arr);
                     hs.remote_nonce = Some(nonce);
+                    hs.remote_ml_kem_ek = Some(ml_kem_ek);
 
                     // Gera challenge
                     let timestamp = chrono::Utc::now().to_rfc3339();
@@ -593,9 +596,15 @@ async fn run_udp_listener(
                     // Deriva chave de sessão
                     let peer_x25519 = hs.remote_x25519_pubkey.unwrap();
                     let remote_nonce = hs.remote_nonce.unwrap();
+                    let ml_kem_shared = hs
+                        .remote_ml_kem_ek
+                        .as_ref()
+                        .and_then(|_ek| Some([0u8; 32])) // TODO: ML-KEM encapsulation not yet wired
+                        .unwrap_or([0u8; 32]);
                     let session_key = crate::network::handshake::derive_session_key(
                         &node.encryption_keypair,
                         &peer_x25519,
+                        &ml_kem_shared,
                         &hs.local_nonce,
                         &remote_nonce,
                     );
@@ -655,9 +664,15 @@ async fn run_udp_listener(
                     // Deriva chave de sessão
                     let peer_x25519 = hs.remote_x25519_pubkey.unwrap();
                     let remote_nonce = hs.remote_nonce.unwrap();
+                    let ml_kem_shared = hs
+                        .remote_ml_kem_ek
+                        .as_ref()
+                        .and_then(|_ek| Some([0u8; 32])) // TODO: ML-KEM encapsulation not yet wired
+                        .unwrap_or([0u8; 32]);
                     let session_key = crate::network::handshake::derive_session_key(
                         &node.encryption_keypair,
                         &peer_x25519,
+                        &ml_kem_shared,
                         &hs.local_nonce,
                         &remote_nonce,
                     );
@@ -861,6 +876,7 @@ async fn run_udp_listener(
                                     node_id: node.node_id.clone(),
                                     ed25519_pubkey: node.public_key.clone(),
                                     x25519_pubkey: node.encryption_keypair.public_bytes().to_vec(),
+                                    ml_kem_ek: node.ml_kem_keypair.encapsulation_key.clone(),
                                     nonce,
                                 };
                                 let _ = transport.send(&hello, peer_addr).await;

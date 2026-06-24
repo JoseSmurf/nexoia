@@ -1,4 +1,5 @@
 pub mod api;
+pub mod connection;
 pub mod crypto;
 pub mod crypto_key;
 pub mod epa;

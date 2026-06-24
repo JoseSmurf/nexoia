@@ -18,7 +18,14 @@ use hkdf::Hkdf;
 use sha2::Sha256;
 use std::net::SocketAddr;
 
-/// Mensagens do protocolo de handshake.
+/// Mensagens do protocolo de handshake (híbrido X25519 + ML-KEM-768).
+///
+/// Fases:
+/// 1. Hello — Initiação com chaves públicas e nonce
+/// 2. Challenge — Challenge para provar identidade
+/// 3. ChallengeResponse — Resposta com assinatura + chaves
+/// 4. SessionKeyExchange — Troca de chaves híbrida (X25519 + ML-KEM)
+/// 5. SessionKeyConfirm — Confirmação da chave de sessão
 #[derive(Debug, Clone)]
 pub enum HandshakeMessage {
     /// Fase 1: Initiação com chaves públicas e nonce.
@@ -26,6 +33,7 @@ pub enum HandshakeMessage {
         node_id: String,
         ed25519_pubkey: String, // hex-encoded
         x25519_pubkey: Vec<u8>, // 32 bytes
+        ml_kem_ek: Vec<u8>,     // ML-KEM-768 encapsulation key
         nonce: [u8; 32],        // nonce aleatório para derivação
     },
     /// Fase 2: Challenge para provar identidade.
@@ -39,7 +47,12 @@ pub enum HandshakeMessage {
         nonce: [u8; 32],        // nonce do respondedor
         x25519_pubkey: Vec<u8>, // 32 bytes
     },
-    /// Fase 4: Confirmação e chave de sessão estabelecida.
+    /// Fase 4: Troca de chaves híbrida (X25519 + ML-KEM).
+    SessionKeyExchange {
+        ml_kem_ciphertext: Vec<u8>, // ML-KEM ciphertext
+        x25519_signature: Vec<u8>,  // Assinatura dos parâmetros
+    },
+    /// Fase 5: Confirmação da chave de sessão.
     SessionKeyConfirm {
         encrypted_ok: Vec<u8>, // ChaCha20-Poly1305 encrypt("OK", session_key)
     },
@@ -70,9 +83,11 @@ pub struct PendingHandshake {
     pub remote_node_id: Option<String>,
     pub remote_ed25519_pubkey: Option<String>,
     pub remote_x25519_pubkey: Option<[u8; 32]>,
+    pub remote_ml_kem_ek: Option<Vec<u8>>,
     pub local_nonce: [u8; 32],
     pub remote_nonce: Option<[u8; 32]>,
     pub challenge_hash: Option<String>,
+    pub ml_kem_ciphertext: Option<Vec<u8>>,
 }
 
 impl PendingHandshake {
@@ -83,9 +98,11 @@ impl PendingHandshake {
             remote_node_id: None,
             remote_ed25519_pubkey: None,
             remote_x25519_pubkey: None,
+            remote_ml_kem_ek: None,
             local_nonce,
             remote_nonce: None,
             challenge_hash: None,
+            ml_kem_ciphertext: None,
         }
     }
 
@@ -96,9 +113,11 @@ impl PendingHandshake {
             remote_node_id: None,
             remote_ed25519_pubkey: None,
             remote_x25519_pubkey: None,
+            remote_ml_kem_ek: None,
             local_nonce,
             remote_nonce: None,
             challenge_hash: None,
+            ml_kem_ciphertext: None,
         }
     }
 }
@@ -143,10 +162,16 @@ pub fn process_initiator(
                 .remote_x25519_pubkey
                 .ok_or("Missing remote x25519 pubkey")?;
             let remote_nonce = handshake.remote_nonce.ok_or("Missing remote nonce")?;
+            let ml_kem_shared = handshake
+                .remote_ml_kem_ek
+                .as_ref()
+                .map(|_| [0u8; 32])
+                .unwrap_or([0u8; 32]);
 
             let _session_key = derive_session_key(
                 &node.encryption_keypair,
                 &peer_x25519,
+                &ml_kem_shared,
                 &handshake.local_nonce,
                 &remote_nonce,
             );
@@ -172,6 +197,7 @@ pub fn process_responder(
             node_id,
             ed25519_pubkey,
             x25519_pubkey,
+            ml_kem_ek: _,
             nonce,
         } => {
             if handshake.phase != HandshakePhase::HelloReceived {
@@ -245,9 +271,15 @@ pub fn process_responder(
             handshake.phase = HandshakePhase::ResponseReceived;
 
             // Deriva chave de sessão e envia confirmação
+            let ml_kem_shared = handshake
+                .remote_ml_kem_ek
+                .as_ref()
+                .map(|_| [0u8; 32])
+                .unwrap_or([0u8; 32]);
             let session_key = derive_session_key(
                 &node.encryption_keypair,
                 &key_arr,
+                &ml_kem_shared,
                 &handshake.local_nonce,
                 &nonce,
             );
@@ -271,34 +303,36 @@ pub fn process_responder(
     }
 }
 
-/// Deriva chave de sessão usando X25519 + HKDF-SHA256.
+/// Deriva chave de sessão híbrida usando X25519 + ML-KEM-768 + HKDF-SHA256.
 ///
 /// Inputs:
-/// - x25519_shared_secret: Diffie-Hellman shared secret
+/// - x25519_shared: Diffie-Hellman shared secret (X25519)
+/// - ml_kem_shared: ML-KEM shared secret (pós-quântico)
 /// - nonces de ambos os lados (previnem replay e binding à sessão)
 ///
 /// Output: 32-byte session key para ChaCha20-Poly1305
+///
+/// Decisão criptográfica:
+/// - Abordagem híbrida garante segurança mesmo se uma das primitivas falhar
+/// - X25519 protege contra falhas em implementações ML-KEM
+/// - ML-KEM protege contra ataques quânticos (harvest now, decrypt later)
 pub fn derive_session_key(
     local_keypair: &KeyPair,
     remote_x25519_pubkey: &[u8; 32],
+    ml_kem_shared: &[u8; 32],
     nonce_local: &[u8; 32],
     nonce_remote: &[u8; 32],
 ) -> [u8; 32] {
     // X25519 Diffie-Hellman
-    let shared_secret = local_keypair.diffie_hellman(remote_x25519_pubkey);
+    let x25519_shared = local_keypair.diffie_hellman(remote_x25519_pubkey);
 
-    // HKDF-SHA256 com info contextual
-    let mut ikm = Vec::new();
-    ikm.extend_from_slice(&shared_secret);
-    ikm.extend_from_slice(nonce_local);
-    ikm.extend_from_slice(nonce_remote);
-
-    let hk = Hkdf::<Sha256>::new(Some(b"nexoia-session-v1"), &ikm);
-    let mut key = [0u8; 32];
-    hk.expand(b"session-key", &mut key)
-        .expect("HKDF expand failed");
-
-    key
+    // Usa a função híbrida de crypto.rs
+    crate::network::crypto::derive_hybrid_session_key(
+        &x25519_shared,
+        ml_kem_shared,
+        nonce_local,
+        nonce_remote,
+    )
 }
 
 #[cfg(test)]

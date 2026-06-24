@@ -32,11 +32,12 @@ pub enum NetworkMessage {
         node_id: String,
         peers: Vec<String>,
     },
-    // Handshake (4 fases)
+    // Handshake (5 fases - híbrido X25519 + ML-KEM-768)
     Hello {
         node_id: String,
         ed25519_pubkey: String,
         x25519_pubkey: Vec<u8>,
+        ml_kem_ek: Vec<u8>, // ML-KEM-768 encapsulation key
         nonce: [u8; 32],
     },
     Challenge {
@@ -47,6 +48,10 @@ pub enum NetworkMessage {
         ed25519_signature: Vec<u8>,
         nonce: [u8; 32],
         x25519_pubkey: Vec<u8>,
+    },
+    SessionKeyExchange {
+        ml_kem_ciphertext: Vec<u8>,
+        x25519_signature: Vec<u8>,
     },
     SessionKeyConfirm {
         encrypted_ok: Vec<u8>,

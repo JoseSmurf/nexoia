@@ -51,18 +51,21 @@ async fn test_three_nodes_send_hello() {
         node_id: node_a.identity.node_id.clone(),
         ed25519_pubkey: node_a.identity.public_key.clone(),
         x25519_pubkey: node_a.identity.encryption_keypair.public_bytes().to_vec(),
+        ml_kem_ek: node_a.identity.ml_kem_keypair.encapsulation_key.clone(),
         nonce: generate_handshake_nonce(),
     };
     let hello_b = NetworkMessage::Hello {
         node_id: node_b.identity.node_id.clone(),
         ed25519_pubkey: node_b.identity.public_key.clone(),
         x25519_pubkey: node_b.identity.encryption_keypair.public_bytes().to_vec(),
+        ml_kem_ek: node_b.identity.ml_kem_keypair.encapsulation_key.clone(),
         nonce: generate_handshake_nonce(),
     };
     let hello_c = NetworkMessage::Hello {
         node_id: node_c.identity.node_id.clone(),
         ed25519_pubkey: node_c.identity.public_key.clone(),
         x25519_pubkey: node_c.identity.encryption_keypair.public_bytes().to_vec(),
+        ml_kem_ek: node_c.identity.ml_kem_keypair.encapsulation_key.clone(),
         nonce: generate_handshake_nonce(),
     };
 

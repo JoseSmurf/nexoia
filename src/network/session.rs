@@ -272,9 +272,20 @@ mod tests {
     fn session_counter_window() {
         let mut session = SessionState::new([0u8; 32], [1u8; 32], [2u8; 32]);
 
+        // Janela de 1024 bits: counter dentro da janela é aceito
         assert!(session.check_counter(100));
         assert!(session.check_counter(950));
-        assert!(!session.check_counter(50));
+        // Counter 50: diff = 950 - 50 = 900 < 1024 → dentro da janela → aceito
+        assert!(session.check_counter(50));
+
+        // Counter 1: diff = 950 - 1 = 949 < 1024 → dentro da janela → aceito
+        assert!(session.check_counter(1));
+
+        // Counter fora da janela: diff >= 1024 → rejeitado
+        // Avança para counter 2048
+        assert!(session.check_counter(2048));
+        // Counter 1023: diff = 2048 - 1023 = 1025 >= 1024 → replay
+        assert!(!session.check_counter(1023));
     }
 
     #[test]

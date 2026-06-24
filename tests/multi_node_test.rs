@@ -1,5 +1,6 @@
 use nexoia::network::epa::SharedEPA;
 use nexoia::network::identity::NodeIdentity;
+use nexoia::network::secure_transport::generate_handshake_nonce;
 use nexoia::network::transport::{NetworkMessage, PeerState, TrustedPeerList, UdpTransport};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -48,18 +49,21 @@ async fn test_three_nodes_send_hello() {
     // Act: Cada nó envia Hello
     let hello_a = NetworkMessage::Hello {
         node_id: node_a.identity.node_id.clone(),
-        public_key: node_a.identity.public_key.clone(),
-        encryption_public_key: node_a.identity.encryption_keypair.public_bytes().to_vec(),
+        ed25519_pubkey: node_a.identity.public_key.clone(),
+        x25519_pubkey: node_a.identity.encryption_keypair.public_bytes().to_vec(),
+        nonce: generate_handshake_nonce(),
     };
     let hello_b = NetworkMessage::Hello {
         node_id: node_b.identity.node_id.clone(),
-        public_key: node_b.identity.public_key.clone(),
-        encryption_public_key: node_b.identity.encryption_keypair.public_bytes().to_vec(),
+        ed25519_pubkey: node_b.identity.public_key.clone(),
+        x25519_pubkey: node_b.identity.encryption_keypair.public_bytes().to_vec(),
+        nonce: generate_handshake_nonce(),
     };
     let hello_c = NetworkMessage::Hello {
         node_id: node_c.identity.node_id.clone(),
-        public_key: node_c.identity.public_key.clone(),
-        encryption_public_key: node_c.identity.encryption_keypair.public_bytes().to_vec(),
+        ed25519_pubkey: node_c.identity.public_key.clone(),
+        x25519_pubkey: node_c.identity.encryption_keypair.public_bytes().to_vec(),
+        nonce: generate_handshake_nonce(),
     };
 
     node_b.send(&hello_b, addr_a).await;
@@ -85,23 +89,33 @@ async fn test_handshake_challenge_response_flow() {
 
     // Act: Node A cria challenge
     let challenge_hash = "abc123";
+    let timestamp = chrono::Utc::now().to_rfc3339();
     let challenge = NetworkMessage::Challenge {
         challenge_hash: challenge_hash.to_string(),
+        timestamp: timestamp.clone(),
     };
 
     // Node B assina o challenge
-    let signature = node_b.identity.sign(challenge_hash);
+    let challenge_input = format!("{}:{}", challenge_hash, timestamp);
+    let signature = node_b.identity.sign(&challenge_input);
 
     // Assert: Assinatura é válida
     assert_eq!(signature.len(), 64); // Ed25519 signature is 64 bytes
 
     // Verificar que a resposta é serializável
-    let response = NetworkMessage::ChallengeResponse { signature };
+    let response = NetworkMessage::ChallengeResponse {
+        ed25519_signature: signature,
+        nonce: generate_handshake_nonce(),
+        x25519_pubkey: node_b.identity.encryption_keypair.public_bytes().to_vec(),
+    };
     let serialized = serde_json::to_vec(&response).unwrap();
     let deserialized: NetworkMessage = serde_json::from_slice(&serialized).unwrap();
 
     match deserialized {
-        NetworkMessage::ChallengeResponse { signature: sig } => {
+        NetworkMessage::ChallengeResponse {
+            ed25519_signature: sig,
+            ..
+        } => {
             assert_eq!(sig.len(), 64);
         }
         _ => panic!("Expected ChallengeResponse message"),

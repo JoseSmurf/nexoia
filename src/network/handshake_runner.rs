@@ -2,7 +2,7 @@
 // Lock order: see GLOBAL LOCK ORDER in src/main.rs
 
 use crate::hash::canonical_hash;
-use crate::limits::{MAX_EPA_ENTRIES, MAX_PENDING_HANDSHAKES};
+use crate::limits::{MAX_EPA_ENTRIES, MAX_PEER_STATES, MAX_PENDING_HANDSHAKES};
 use crate::network::epa::SharedEPA;
 use crate::network::handshake::{HandshakePhase, PendingHandshake};
 use crate::network::identity::NodeIdentity;
@@ -574,6 +574,18 @@ pub async fn run_udp_listener(
                         if let Some(state) = states.get_mut(&addr) {
                             state.record_heartbeat();
                         } else {
+                            if states.len() >= MAX_PEER_STATES {
+                                if let Some((evict_addr, _)) =
+                                    states.iter().min_by_key(|(_, s)| s.last_seen)
+                                {
+                                    let evict_addr = *evict_addr;
+                                    eprintln!(
+                                        "peer_states: evicting peer {} (last_seen={}) to make room",
+                                        evict_addr, states[&evict_addr].last_seen
+                                    );
+                                    states.remove(&evict_addr);
+                                }
+                            }
                             states.insert(addr, PeerState::new());
                         }
                     }

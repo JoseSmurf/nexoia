@@ -1,6 +1,7 @@
 // heartbeat.rs — Heartbeat sender and monitor
 // Lock order: see GLOBAL LOCK ORDER in src/main.rs
 
+use crate::limits::MAX_PEER_STATES;
 use crate::network::identity::NodeIdentity;
 use crate::network::reputation::ReputationStore;
 use crate::network::session::SessionManager;

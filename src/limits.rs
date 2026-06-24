@@ -19,6 +19,10 @@ pub const MAX_PEERS: usize = 512;
 /// SocketAddr (not node_id) and holds no reputation field.
 pub const MAX_SESSIONS: usize = 4_096;
 
+/// Maximum tracked peer states (heartbeat tracking per address).
+/// Evicts the peer with the oldest `last_seen` timestamp (LRU).
+pub const MAX_PEER_STATES: usize = 512;
+
 /// Maximum entries in ReputationStore.
 /// Excess entries evict the entry with lowest success_count.
 pub const MAX_REPUTATION_ENTRIES: usize = 10_000;

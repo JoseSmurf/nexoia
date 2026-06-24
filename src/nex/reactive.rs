@@ -10,10 +10,40 @@ use std::fmt;
 /// Evento que dispara regras reativas.
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
-    HeartbeatMiss { count: u32 },
-    ReputationBelow { value: f32 },
-    PeerConnected { node_id: String },
-    PeerDisconnected { node_id: String },
+    HeartbeatMiss {
+        count: u32,
+    },
+    ReputationBelow {
+        value: f32,
+    },
+    PeerConnected {
+        node_id: String,
+    },
+    PeerDisconnected {
+        node_id: String,
+    },
+    /// Handshake iniciado com um peer
+    HandshakeStarted {
+        addr: String,
+    },
+    /// Handshake completado com sucesso
+    HandshakeCompleted {
+        addr: String,
+        node_id: String,
+    },
+    /// Handshake falhou
+    HandshakeFailed {
+        addr: String,
+        reason: String,
+    },
+    /// Sessão criada com um peer
+    SessionCreated {
+        addr: String,
+    },
+    /// Sessão removida (timeout ou erro)
+    SessionRemoved {
+        addr: String,
+    },
 }
 
 /// Ação a ser executada pelo sistema.
@@ -140,6 +170,10 @@ impl ReactiveEngine {
             }
             (Trigger::PeerConnected, NetworkEvent::PeerConnected { .. }) => true,
             (Trigger::PeerDisconnected, NetworkEvent::PeerDisconnected { .. }) => true,
+            (Trigger::HandshakeCompleted, NetworkEvent::HandshakeCompleted { .. }) => true,
+            (Trigger::HandshakeFailed, NetworkEvent::HandshakeFailed { .. }) => true,
+            (Trigger::SessionCreated, NetworkEvent::SessionCreated { .. }) => true,
+            (Trigger::SessionRemoved, NetworkEvent::SessionRemoved { .. }) => true,
             _ => false,
         }
     }
@@ -187,6 +221,15 @@ impl fmt::Display for NetworkEvent {
             NetworkEvent::PeerDisconnected { node_id } => {
                 write!(f, "peer_disconnected({})", node_id)
             }
+            NetworkEvent::HandshakeStarted { addr } => write!(f, "handshake_started({})", addr),
+            NetworkEvent::HandshakeCompleted { addr, node_id } => {
+                write!(f, "handshake_completed({},{})", addr, node_id)
+            }
+            NetworkEvent::HandshakeFailed { addr, reason } => {
+                write!(f, "handshake_failed({},{})", addr, reason)
+            }
+            NetworkEvent::SessionCreated { addr } => write!(f, "session_created({})", addr),
+            NetworkEvent::SessionRemoved { addr } => write!(f, "session_removed({})", addr),
         }
     }
 }

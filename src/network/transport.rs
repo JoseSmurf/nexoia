@@ -51,7 +51,8 @@ pub enum NetworkMessage {
     },
     SessionKeyExchange {
         ml_kem_ciphertext: Vec<u8>,
-        x25519_signature: Vec<u8>,
+        x25519_pubkey: Vec<u8>, // responder's ephemeral x25519
+        signature: Vec<u8>,     // Ed25519 signature over session params
     },
     SessionKeyConfirm {
         encrypted_ok: Vec<u8>,

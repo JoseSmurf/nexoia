@@ -117,6 +117,10 @@ pub enum Trigger {
     ReputationBelow { threshold: f32 },
     PeerConnected,
     PeerDisconnected,
+    HandshakeCompleted,
+    HandshakeFailed,
+    SessionCreated,
+    SessionRemoved,
 }
 
 /// Ação permitida em comportamentos reativos.

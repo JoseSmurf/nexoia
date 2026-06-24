@@ -40,6 +40,10 @@ impl From<&ReactiveRule> for ReactiveRuleSnapshot {
             }
             Trigger::PeerConnected => ("peer_connected".to_string(), String::new()),
             Trigger::PeerDisconnected => ("peer_disconnected".to_string(), String::new()),
+            Trigger::HandshakeCompleted => ("handshake_completed".to_string(), String::new()),
+            Trigger::HandshakeFailed => ("handshake_failed".to_string(), String::new()),
+            Trigger::SessionCreated => ("session_created".to_string(), String::new()),
+            Trigger::SessionRemoved => ("session_removed".to_string(), String::new()),
         };
 
         let actions = rule.actions.iter().map(|a| format!("{:?}", a)).collect();
@@ -67,6 +71,10 @@ impl ReactiveRuleSnapshot {
             }
             "peer_connected" => Trigger::PeerConnected,
             "peer_disconnected" => Trigger::PeerDisconnected,
+            "handshake_completed" => Trigger::HandshakeCompleted,
+            "handshake_failed" => Trigger::HandshakeFailed,
+            "session_created" => Trigger::SessionCreated,
+            "session_removed" => Trigger::SessionRemoved,
             _ => return None,
         };
 

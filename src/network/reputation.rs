@@ -1,7 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 
 /// Reputação de um nó na rede.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -4,7 +4,7 @@ use chacha20poly1305::{
 };
 use hkdf::Hkdf;
 use sha2::Sha256;
-use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
+use x25519_dalek::{PublicKey, StaticSecret};
 
 /// Par de chaves X25519 para troca segura.
 #[derive(Clone)]
@@ -38,13 +38,19 @@ impl KeyPair {
         self.secret.to_bytes()
     }
 
-    /// Deriva shared secret com outro nó e cria cipher para encriptação.
-    pub fn derive_cipher(&self, peer_public_bytes: &[u8; 32]) -> Result<ChaCha20Poly1305, String> {
+    /// Realiza Diffie-Hellman X25519 e retorna o shared secret.
+    pub fn diffie_hellman(&self, peer_public_bytes: &[u8; 32]) -> [u8; 32] {
         let peer_public = PublicKey::from(*peer_public_bytes);
         let shared_secret = self.secret.diffie_hellman(&peer_public);
+        *shared_secret.as_bytes()
+    }
+
+    /// Deriva shared secret com outro nó e cria cipher para encriptação.
+    pub fn derive_cipher(&self, peer_public_bytes: &[u8; 32]) -> Result<ChaCha20Poly1305, String> {
+        let shared_secret_bytes = self.diffie_hellman(peer_public_bytes);
 
         // Derive key usando HKDF-SHA256
-        let hk = Hkdf::<Sha256>::new(None, shared_secret.as_bytes());
+        let hk = Hkdf::<Sha256>::new(None, &shared_secret_bytes);
         let mut key = [0u8; 32];
         hk.expand(b"nexoia-epa-encryption", &mut key)
             .map_err(|e| format!("HKDF error: {}", e))?;

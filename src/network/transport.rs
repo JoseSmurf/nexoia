@@ -3,9 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tokio::net::UdpSocket;
-use tokio::sync::RwLock;
 
 /// Mensagens de rede entre nós.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,29 +27,32 @@ pub enum NetworkMessage {
     HeartbeatAck {
         node_id: String,
     },
-    // Peer Exchange
+    // Peer Exchange (após autenticação)
     PeerExchange {
         node_id: String,
         peers: Vec<String>,
     },
-    // Handshake
+    // Handshake (4 fases)
     Hello {
         node_id: String,
-        public_key: String,
-        encryption_public_key: Vec<u8>,
+        ed25519_pubkey: String,
+        x25519_pubkey: Vec<u8>,
+        nonce: [u8; 32],
     },
     Challenge {
         challenge_hash: String,
+        timestamp: String,
     },
     ChallengeResponse {
-        signature: Vec<u8>,
+        ed25519_signature: Vec<u8>,
+        nonce: [u8; 32],
+        x25519_pubkey: Vec<u8>,
     },
-    HandshakeOk {
-        node_id: String,
+    SessionKeyConfirm {
+        encrypted_ok: Vec<u8>,
     },
-    HandshakeFailed {
-        reason: String,
-    },
+    // Mensagem encriptada (após handshake)
+    SecureMessage(crate::network::secure_transport::SecureMessage),
 }
 
 /// Estado de um peer para controle de heartbeat e reconexão.
@@ -201,6 +202,7 @@ impl TrustedPeerList {
 }
 
 /// UDP Transport para comunicação entre nós.
+/// Usa length-prefix framing para prevenir truncamento de mensagens.
 pub struct UdpTransport {
     socket: UdpSocket,
     recv_buffer: [u8; 65536],
@@ -215,6 +217,7 @@ impl UdpTransport {
         })
     }
 
+    /// Envia mensagem com length-prefix framing (4 bytes big-endian).
     pub async fn send(
         &self,
         msg: &NetworkMessage,
@@ -222,7 +225,20 @@ impl UdpTransport {
     ) -> Result<(), std::io::Error> {
         let data = serde_json::to_vec(msg)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        self.socket.send_to(&data, target).await?;
+
+        // Length-prefix framing: 4 bytes + payload
+        let len = data.len() as u32;
+        let mut framed = Vec::with_capacity(4 + data.len());
+        framed.extend_from_slice(&len.to_be_bytes());
+        framed.extend_from_slice(&data);
+
+        self.socket.send_to(&framed, target).await?;
+        Ok(())
+    }
+
+    /// Envia bytes brutos (para mensagens já frameadas).
+    pub async fn send_raw(&self, data: &[u8], target: SocketAddr) -> Result<(), std::io::Error> {
+        self.socket.send_to(data, target).await?;
         Ok(())
     }
 
@@ -233,16 +249,45 @@ impl UdpTransport {
     ) -> Result<(), std::io::Error> {
         let data = serde_json::to_vec(msg)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        // Length-prefix framing
+        let len = data.len() as u32;
+        let mut framed = Vec::with_capacity(4 + data.len());
+        framed.extend_from_slice(&len.to_be_bytes());
+        framed.extend_from_slice(&data);
+
         self.socket.set_broadcast(true)?;
-        self.socket.send_to(&data, broadcast_addr).await?;
+        self.socket.send_to(&framed, broadcast_addr).await?;
         self.socket.set_broadcast(false)?;
         Ok(())
     }
 
+    /// Recebe mensagem com length-prefix framing.
     pub async fn recv(&mut self) -> Result<(NetworkMessage, SocketAddr), std::io::Error> {
         let (len, addr) = self.socket.recv_from(&mut self.recv_buffer).await?;
-        let msg: NetworkMessage = serde_json::from_slice(&self.recv_buffer[..len])
+
+        if len < 4 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Message too short for frame header",
+            ));
+        }
+
+        // Lê length prefix
+        let mut len_bytes = [0u8; 4];
+        len_bytes.copy_from_slice(&self.recv_buffer[..4]);
+        let expected_len = u32::from_be_bytes(len_bytes) as usize;
+
+        if len < 4 + expected_len {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Message truncated",
+            ));
+        }
+
+        let msg: NetworkMessage = serde_json::from_slice(&self.recv_buffer[4..4 + expected_len])
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
         Ok((msg, addr))
     }
 

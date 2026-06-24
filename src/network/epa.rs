@@ -1,7 +1,6 @@
 use crate::hash::canonical_hash;
 use crate::network::crypto::{self, KeyPair};
 use crate::network::identity::{verify_signature, NodeIdentity};
-use chacha20poly1305::ChaCha20Poly1305;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;

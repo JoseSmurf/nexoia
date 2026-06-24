@@ -1,7 +1,9 @@
 use crate::network::epa::SharedEPA;
-use crate::network::transport::{TrustedPeer, TrustedPeerList};
+use crate::network::transport::{PeerList, TrustedPeer, TrustedPeerList};
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PersistedData {
@@ -157,6 +159,36 @@ pub fn persisted_to_trusted(data: &[PersistedTrustedPeer], max_peers: usize) -> 
         }
     }
     list
+}
+
+pub async fn save_network_state(
+    data_path: &Path,
+    peers: &Arc<RwLock<PeerList>>,
+    epas: &Arc<RwLock<Vec<SharedEPA>>>,
+    trusted_peers: &Arc<RwLock<TrustedPeerList>>,
+) {
+    let peer_addrs = {
+        let peer_list = peers.read().await;
+        format_peers(peer_list.peers())
+    };
+    let epa_list = {
+        let epa_list = epas.read().await;
+        epa_list.clone()
+    };
+    let trusted_persisted = {
+        let trusted_list = trusted_peers.read().await;
+        trusted_to_persisted(&trusted_list)
+    };
+
+    let data = PersistedData {
+        peers: peer_addrs,
+        epas: epa_list,
+        trusted_peers: trusted_persisted,
+    };
+
+    if let Err(e) = save_data(data_path, &data) {
+        eprintln!("Failed to save network state: {}", e);
+    }
 }
 
 #[cfg(test)]

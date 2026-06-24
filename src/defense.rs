@@ -1,5 +1,6 @@
 //! defense.rs — Camada de defesa do NEXOIA
 
+use crate::limits::{MAX_RATE_LIMIT_KEY_LEN, MAX_RATE_LIMIT_SOURCES};
 use std::collections::hash_map::RandomState;
 use std::collections::{HashMap, VecDeque};
 use std::hash::BuildHasher;
@@ -153,8 +154,8 @@ impl RateLimiter {
             hash_builder: RandomState::new(),
             max_requests,
             window,
-            max_sources: 100_000,
-            max_source_key_len: 128,
+            max_sources: MAX_RATE_LIMIT_SOURCES,
+            max_source_key_len: MAX_RATE_LIMIT_KEY_LEN,
             shutdown_tx,
             _worker_thread: Some(worker_thread),
         }

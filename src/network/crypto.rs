@@ -7,6 +7,7 @@ use ml_kem::kem::{Decapsulate, Encapsulate};
 use ml_kem::{Generate, KeyExport, MlKem768, Seed};
 use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Par de chaves X25519 para troca segura.
 #[derive(Clone)]
@@ -61,13 +62,20 @@ impl KeyPair {
     }
 }
 
+impl Drop for KeyPair {
+    fn drop(&mut self) {
+        self.secret.zeroize();
+    }
+}
+
 /// Par de chaves ML-KEM-768 para proteção pós-quântica.
 /// ML-KEM-768 é o padrão NIST FIPS 203, security category 3 (192-bit).
-#[derive(Clone)]
+#[derive(Clone, ZeroizeOnDrop)]
 pub struct MlKemKeyPair {
     /// Chave de encapsulamento (pública) — usada para criar shared secret.
     pub encapsulation_key: Vec<u8>,
     /// Seed de desencapsulamento (privada) — 64 bytes, usada para decapsular.
+    #[zeroize(drop)]
     decapsulation_key_seed: Vec<u8>,
 }
 

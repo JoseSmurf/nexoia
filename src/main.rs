@@ -1047,13 +1047,27 @@ async fn run_udp_listener(
                     for peer_addr_str in &peer_addrs {
                         if let Ok(peer_addr) = peer_addr_str.parse::<SocketAddr>() {
                             if peer_addr != addr && !peer_list.contains(&peer_addr) {
-                                // Envia Hello para novo peer (inicia handshake)
+                                // HAND-1 FIX: Store ephemeral secret in PendingHandshake
+                                // before sending Hello, so we can complete DH when
+                                // the remote peer responds with Challenge.
                                 let nonce = generate_handshake_nonce();
-                                // Gera chave efêmera X25519 para forward secrecy
                                 let ephemeral_secret =
                                     EphemeralSecret::random_from_rng(rand::rngs::OsRng);
                                 let ephemeral_public =
                                     x25519_dalek::PublicKey::from(&ephemeral_secret);
+
+                                let local_nonce = generate_handshake_nonce();
+                                let mut hs = PendingHandshake::new_initiator(
+                                    peer_addr,
+                                    local_nonce,
+                                    ephemeral_secret,
+                                );
+                                hs.remote_nonce = Some(nonce);
+                                {
+                                    let mut pending = pending_handshakes.write().await;
+                                    pending.insert(peer_addr, hs);
+                                }
+
                                 let hello = NetworkMessage::Hello {
                                     node_id: node.node_id.clone(),
                                     ed25519_pubkey: node.public_key.clone(),

@@ -118,6 +118,13 @@ impl SessionState {
     }
 }
 
+impl Drop for SessionState {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.session_key.zeroize();
+    }
+}
+
 /// Desloca o bitmap para a esquerda em `bits` posições (move bits para posições mais altas).
 fn shift_window_left(window: &mut [u64; WINDOW_WORDS], bits: u64) {
     if bits >= ANTI_REPLAY_WINDOW_SIZE {

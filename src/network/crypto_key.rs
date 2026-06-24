@@ -4,22 +4,16 @@
 
 use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
-    Aes256Gcm, Nonce,
+    Aes256Gcm, Key, Nonce,
 };
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
+use zeroize::Zeroizing;
 
 const PBKDF2_ITERATIONS: u32 = 100_000;
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
 const KEY_LEN: usize = 32;
-
-/// Deriva chave de criptografia a partir de passphrase.
-fn derive_key(passphrase: &[u8], salt: &[u8; SALT_LEN]) -> [u8; KEY_LEN] {
-    let mut key = [0u8; KEY_LEN];
-    pbkdf2_hmac::<Sha256>(passphrase, salt, PBKDF2_ITERATIONS, &mut key);
-    key
-}
 
 /// Criptografa dados com passphrase.
 /// Formato: salt (16 bytes) + nonce (12 bytes) + ciphertext
@@ -28,8 +22,9 @@ pub fn encrypt_with_passphrase(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>
     use rand::RngCore;
     OsRng.fill_bytes(&mut salt);
 
-    let key = derive_key(passphrase, &salt);
-    let cipher = Aes256Gcm::new(&key.into());
+    let mut key = Zeroizing::new([0u8; KEY_LEN]);
+    pbkdf2_hmac::<Sha256>(passphrase, &salt, PBKDF2_ITERATIONS, key.as_mut());
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key.as_ref()));
 
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
     let ciphertext = cipher
@@ -54,8 +49,9 @@ pub fn decrypt_with_passphrase(encrypted: &[u8], passphrase: &[u8]) -> Result<Ve
     let mut salt_arr = [0u8; SALT_LEN];
     salt_arr.copy_from_slice(salt);
 
-    let key = derive_key(passphrase, &salt_arr);
-    let cipher = Aes256Gcm::new(&key.into());
+    let mut key = Zeroizing::new([0u8; KEY_LEN]);
+    pbkdf2_hmac::<Sha256>(passphrase, &salt_arr, PBKDF2_ITERATIONS, key.as_mut());
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key.as_ref()));
     let nonce = Nonce::from_slice(nonce_bytes);
 
     cipher

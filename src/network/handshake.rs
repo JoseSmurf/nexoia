@@ -143,6 +143,15 @@ impl PendingHandshake {
     }
 }
 
+impl Drop for PendingHandshake {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        if let Some(ref mut secret) = self.ephemeral_secret {
+            secret.zeroize();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

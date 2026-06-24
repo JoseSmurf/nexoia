@@ -501,6 +501,7 @@ async fn run_udp_listener(
                     let challenge_input = format!("{}:{}:{}", node_id, timestamp, addr);
                     let challenge_hash = canonical_hash(&challenge_input);
                     hs.challenge_hash = Some(challenge_hash.clone());
+                    hs.challenge_timestamp = Some(timestamp.clone());
                     hs.phase = HandshakePhase::ChallengeSent;
 
                     // Salva handshake pendente
@@ -574,7 +575,7 @@ async fn run_udp_listener(
                     // Verifica assinatura Ed25519
                     let pubkey_hex = hs.remote_ed25519_pubkey.as_ref().unwrap();
                     let challenge = hs.challenge_hash.as_ref().unwrap();
-                    let timestamp = chrono::Utc::now().to_rfc3339();
+                    let timestamp = hs.challenge_timestamp.as_ref().unwrap();
                     let challenge_input = format!("{}:{}", challenge, timestamp);
 
                     let valid = crate::network::identity::verify_signature(
@@ -647,6 +648,10 @@ async fn run_udp_listener(
                         &hs.local_nonce,
                         &nonce,
                     );
+
+                    // Salva chave de sessão para verificação no SessionKeyConfirm
+                    let session_key_bytes: [u8; 32] = session_key.into();
+                    hs.session_key = Some(session_key_bytes);
 
                     // Assina parâmetros da sessão
                     let mut sign_input = Vec::new();
@@ -784,25 +789,18 @@ async fn run_udp_listener(
                     let hs = hs.unwrap();
 
                     // Recupera chave de sessão derivada na fase anterior
-                    let ml_kem_shared = match hs.ml_kem_shared {
+                    let session_key = match hs.session_key {
                         Some(s) => s,
                         None => {
-                            eprintln!("  ✗ Missing ML-KEM shared secret (SessionKeyExchange not processed?)");
+                            eprintln!(
+                                "  ✗ Missing session key (SessionKeyExchange not processed?)"
+                            );
                             continue;
                         }
                     };
 
                     let peer_x25519 = hs.remote_x25519_pubkey.unwrap_or([0u8; 32]);
                     let remote_nonce = hs.remote_nonce.unwrap_or([0u8; 32]);
-
-                    // Deriva a mesma chave de sessão usando DH efêmero + ML-KEM
-                    let x25519_shared = node.encryption_keypair.diffie_hellman(&peer_x25519);
-                    let session_key = crate::network::crypto::derive_hybrid_session_key(
-                        &x25519_shared,
-                        &ml_kem_shared,
-                        &hs.local_nonce,
-                        &remote_nonce,
-                    );
 
                     // Verifica que "OK" foi descriptografado corretamente
                     use chacha20poly1305::{

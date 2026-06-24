@@ -42,6 +42,7 @@ pub struct PendingHandshake {
     pub local_nonce: [u8; 32],
     pub remote_nonce: Option<[u8; 32]>,
     pub challenge_hash: Option<String>,
+    pub challenge_timestamp: Option<String>,
     pub ml_kem_ciphertext: Option<Vec<u8>>,
     /// Chave efêmera X25519 local (para forward secrecy)
     pub ephemeral_secret: Option<EphemeralSecret>,
@@ -49,6 +50,8 @@ pub struct PendingHandshake {
     pub ephemeral_public: Option<[u8; 32]>,
     /// Shared secret ML-KEM após encapsulação/desencapsulação
     pub ml_kem_shared: Option<[u8; 32]>,
+    /// Chave de sessão derivada (para verificação no SessionKeyConfirm)
+    pub session_key: Option<[u8; 32]>,
 }
 
 impl std::fmt::Debug for PendingHandshake {
@@ -66,6 +69,7 @@ impl std::fmt::Debug for PendingHandshake {
             .field("local_nonce", &self.local_nonce)
             .field("remote_nonce", &self.remote_nonce)
             .field("challenge_hash", &self.challenge_hash)
+            .field("challenge_timestamp", &self.challenge_timestamp)
             .field(
                 "ml_kem_ciphertext",
                 &self.ml_kem_ciphertext.as_ref().map(|v| v.len()),
@@ -92,10 +96,12 @@ impl PendingHandshake {
             local_nonce,
             remote_nonce: None,
             challenge_hash: None,
+            challenge_timestamp: None,
             ml_kem_ciphertext: None,
             ephemeral_secret: Some(ephemeral_secret),
             ephemeral_public: Some(ephemeral_public.to_bytes()),
             ml_kem_shared: None,
+            session_key: None,
         }
     }
 }

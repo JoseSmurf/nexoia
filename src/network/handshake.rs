@@ -14,6 +14,7 @@
 //! - ChaCha20-Poly1305 para encriptação (AEAD, resistente a timing attacks)
 
 use std::net::SocketAddr;
+use std::time::Instant;
 use x25519_dalek::EphemeralSecret;
 
 /// Estado do handshake durante a negociação.
@@ -52,6 +53,8 @@ pub struct PendingHandshake {
     pub ml_kem_shared: Option<[u8; 32]>,
     /// Chave de sessão derivada (para verificação no SessionKeyConfirm)
     pub session_key: Option<[u8; 32]>,
+    /// Timestamp de criação (para timeout de INV-2)
+    pub created_at: Instant,
 }
 
 impl std::fmt::Debug for PendingHandshake {
@@ -77,11 +80,16 @@ impl std::fmt::Debug for PendingHandshake {
             .field("ephemeral_secret", &"[redacted]")
             .field("ephemeral_public", &self.ephemeral_public)
             .field("ml_kem_shared", &self.ml_kem_shared)
+            .field("created_at", &self.created_at.elapsed())
             .finish()
     }
 }
 
 impl PendingHandshake {
+    /// Retorna true se o handshake expirou (mais de `timeout` sem completar).
+    pub fn is_expired(&self, timeout: std::time::Duration) -> bool {
+        self.created_at.elapsed() > timeout
+    }
     pub fn new_responder(remote_addr: SocketAddr, local_nonce: [u8; 32]) -> Self {
         // Gera chave efêmera X25519 para forward secrecy
         let ephemeral_secret = EphemeralSecret::random_from_rng(rand::rngs::OsRng);
@@ -102,6 +110,35 @@ impl PendingHandshake {
             ephemeral_public: Some(ephemeral_public.to_bytes()),
             ml_kem_shared: None,
             session_key: None,
+            created_at: Instant::now(),
+        }
+    }
+
+    /// Cria handshake pendente para o initiator (quando enviamos Hello).
+    /// O caller deve fornecer a chave efêmera já gerada (para usar no Hello).
+    pub fn new_initiator(
+        remote_addr: SocketAddr,
+        local_nonce: [u8; 32],
+        ephemeral_secret: EphemeralSecret,
+    ) -> Self {
+        let ephemeral_public = x25519_dalek::PublicKey::from(&ephemeral_secret);
+        Self {
+            phase: HandshakePhase::HelloReceived,
+            remote_addr,
+            remote_node_id: None,
+            remote_ed25519_pubkey: None,
+            remote_x25519_pubkey: None,
+            remote_ml_kem_ek: None,
+            local_nonce,
+            remote_nonce: None,
+            challenge_hash: None,
+            challenge_timestamp: None,
+            ml_kem_ciphertext: None,
+            ephemeral_secret: Some(ephemeral_secret),
+            ephemeral_public: Some(ephemeral_public.to_bytes()),
+            ml_kem_shared: None,
+            session_key: None,
+            created_at: Instant::now(),
         }
     }
 }

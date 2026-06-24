@@ -212,6 +212,19 @@ impl SessionManager {
         sessions.len()
     }
 
+    /// Verifica e atualiza o contador anti-replay diretamente na sessão armazenada.
+    ///
+    /// Retorna `true` se o counter é válido (não replay), `false` caso contrário.
+    /// Atualiza o bitmap e recv_counter in-place sem clone-discard.
+    pub async fn check_counter(&self, addr: &SocketAddr, counter: u64) -> bool {
+        let mut sessions = self.sessions.write().await;
+        if let Some(session) = sessions.get_mut(addr) {
+            session.check_counter(counter)
+        } else {
+            false
+        }
+    }
+
     /// Remove sessões expiradas (mais de timeout_secs sem atividade).
     pub async fn cleanup(&self, timeout_secs: u64) {
         let mut sessions = self.sessions.write().await;

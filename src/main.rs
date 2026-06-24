@@ -216,6 +216,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Heartbeat:    Every 30s, timeout 5min");
     println!();
 
+    // Cria pending_handshakes ANTES do bootstrap (usado por HAND-1)
+    let pending_handshakes = Arc::new(RwLock::new(HashMap::<SocketAddr, PendingHandshake>::new()));
+
     // Conecta a bootstrap peers (se configurados)
     if !config.bootstrap_peers.is_empty() {
         println!(
@@ -228,6 +231,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Gera chave efêmera X25519 para forward secrecy
             let ephemeral_secret = EphemeralSecret::random_from_rng(rand::rngs::OsRng);
             let ephemeral_public = x25519_dalek::PublicKey::from(&ephemeral_secret);
+
+            // HAND-1 FIX: Cria PendingHandshake ANTES de enviar Hello
+            let local_nonce = generate_handshake_nonce();
+            let mut hs = PendingHandshake::new_initiator(*peer_addr, local_nonce, ephemeral_secret);
+            hs.remote_nonce = Some(nonce);
+            {
+                let mut pending = pending_handshakes.write().await;
+                pending.insert(*peer_addr, hs);
+            }
+
             let hello = NetworkMessage::Hello {
                 node_id: node.node_id.clone(),
                 ed25519_pubkey: node.public_key.clone(),
@@ -305,7 +318,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let peer_states_clone = Arc::clone(&peer_states);
     let data_path_clone = data_path.clone();
     let disable_encryption = config.disable_encryption;
-    let pending_handshakes = Arc::new(RwLock::new(HashMap::new()));
+
+    // INV-2 FIX: Cleanup de handshakes pendentes expirados (5 minutos)
+    let pending_handshakes_cleanup = Arc::clone(&pending_handshakes);
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            let mut pending = pending_handshakes_cleanup.write().await;
+            let timeout = std::time::Duration::from_secs(300);
+            let before = pending.len();
+            pending.retain(|addr, hs| {
+                if hs.is_expired(timeout) {
+                    eprintln!("  ⏰ Pending handshake expired for {}", addr);
+                    false
+                } else {
+                    true
+                }
+            });
+            let removed = before.saturating_sub(pending.len());
+            if removed > 0 {
+                eprintln!("Handshake cleanup: removed {} expired handshakes", removed);
+            }
+        }
+    });
 
     tokio::spawn(async move {
         run_udp_listener(
@@ -567,124 +602,126 @@ async fn run_udp_listener(
                 } => {
                     println!("Handshake: ChallengeResponse from {}", addr);
 
-                    // Busca handshake pendente
-                    let mut pending = pending_handshakes.write().await;
-                    let hs = pending.get_mut(&addr);
-                    if hs.is_none() {
-                        eprintln!("  ✗ No pending handshake for {}", addr);
-                        continue;
-                    }
-                    let hs = hs.unwrap();
+                    // MEM-2 FIX: Usa bloco labelado para garantir cleanup em falhas
+                    let result: Result<(), String> = 'hs: {
+                        let mut pending = pending_handshakes.write().await;
+                        let hs = match pending.get_mut(&addr) {
+                            Some(hs) => hs,
+                            None => {
+                                eprintln!("  ✗ No pending handshake for {}", addr);
+                                break 'hs Ok(());
+                            }
+                        };
 
-                    // Verifica assinatura Ed25519
-                    let pubkey_hex = hs.remote_ed25519_pubkey.as_ref().unwrap();
-                    let challenge = hs.challenge_hash.as_ref().unwrap();
-                    let timestamp = hs.challenge_timestamp.as_ref().unwrap();
-                    let challenge_input = format!("{}:{}", challenge, timestamp);
+                        // Verifica assinatura Ed25519
+                        let pubkey_hex = hs.remote_ed25519_pubkey.as_ref().unwrap();
+                        let challenge = hs.challenge_hash.as_ref().unwrap();
+                        let timestamp = hs.challenge_timestamp.as_ref().unwrap();
+                        let challenge_input = format!("{}:{}", challenge, timestamp);
 
-                    let valid = crate::network::identity::verify_signature(
-                        pubkey_hex,
-                        challenge_input.as_bytes(),
-                        &ed25519_signature,
-                    )
-                    .unwrap_or(false);
+                        let valid = crate::network::identity::verify_signature(
+                            pubkey_hex,
+                            challenge_input.as_bytes(),
+                            &ed25519_signature,
+                        )
+                        .unwrap_or(false);
 
-                    if !valid {
-                        eprintln!("  ✗ Invalid Ed25519 signature from {}", addr);
-                        hs.phase = HandshakePhase::Failed("Invalid signature".to_string());
-                        continue;
-                    }
+                        if !valid {
+                            break 'hs Err("Invalid Ed25519 signature".to_string());
+                        }
 
-                    // Valida x25519 pubkey (chave efêmera do initiator)
-                    if x25519_pubkey.len() != 32 {
-                        eprintln!("  ✗ Invalid x25519 pubkey length from {}", addr);
-                        continue;
-                    }
+                        // Valida x25519 pubkey (chave efêmera do initiator)
+                        if x25519_pubkey.len() != 32 {
+                            break 'hs Err("Invalid x25519 pubkey length".to_string());
+                        }
 
-                    let mut key_arr = [0u8; 32];
-                    key_arr.copy_from_slice(&x25519_pubkey);
-                    hs.remote_x25519_pubkey = Some(key_arr);
-                    hs.remote_nonce = Some(nonce);
+                        let mut key_arr = [0u8; 32];
+                        key_arr.copy_from_slice(&x25519_pubkey);
+                        hs.remote_x25519_pubkey = Some(key_arr);
+                        hs.remote_nonce = Some(nonce);
 
-                    // Encapsula ML-KEM com a chave pública do initiator
-                    let ml_kem_shared = match &hs.remote_ml_kem_ek {
-                        Some(ek) => {
-                            match crate::network::crypto::MlKemKeyPair::from_bytes(ek, &[]) {
-                                Ok(keypair) => match keypair.encapsulate() {
-                                    Ok((ct, shared)) => {
-                                        hs.ml_kem_ciphertext = Some(ct.clone());
-                                        Some(shared)
-                                    }
+                        // Encapsula ML-KEM com a chave pública do initiator
+                        let ml_kem_shared = match &hs.remote_ml_kem_ek {
+                            Some(ek) => {
+                                match crate::network::crypto::MlKemKeyPair::from_bytes(ek, &[]) {
+                                    Ok(keypair) => match keypair.encapsulate() {
+                                        Ok((ct, shared)) => {
+                                            hs.ml_kem_ciphertext = Some(ct.clone());
+                                            Some(shared)
+                                        }
+                                        Err(e) => {
+                                            break 'hs Err(format!(
+                                                "ML-KEM encapsulation failed: {}",
+                                                e
+                                            ));
+                                        }
+                                    },
                                     Err(e) => {
-                                        eprintln!("  ✗ ML-KEM encapsulation failed: {}", e);
-                                        continue;
+                                        break 'hs Err(format!(
+                                            "ML-KEM key reconstruction failed: {}",
+                                            e
+                                        ));
                                     }
-                                },
-                                Err(e) => {
-                                    eprintln!("  ✗ ML-KEM key reconstruction failed: {}", e);
-                                    continue;
                                 }
                             }
+                            None => {
+                                break 'hs Err("No ML-KEM ek".to_string());
+                            }
+                        };
+
+                        // DH com chave efêmera do initiator
+                        let ephemeral_secret = match hs.ephemeral_secret.take() {
+                            Some(s) => s,
+                            None => {
+                                break 'hs Err("Missing local ephemeral secret".to_string());
+                            }
+                        };
+                        let initiator_ephemeral = x25519_dalek::PublicKey::from(key_arr);
+                        let x25519_shared = ephemeral_secret.diffie_hellman(&initiator_ephemeral);
+
+                        // Deriva chave de sessão híbrida
+                        let ml_kem_shared = ml_kem_shared.unwrap_or([0u8; 32]);
+                        let session_key = crate::network::crypto::derive_hybrid_session_key(
+                            x25519_shared.as_bytes(),
+                            &ml_kem_shared,
+                            &hs.local_nonce,
+                            &nonce,
+                        );
+
+                        // Salva chave de sessão para verificação no SessionKeyConfirm
+                        let session_key_bytes: [u8; 32] = session_key.into();
+                        hs.session_key = Some(session_key_bytes);
+
+                        // Assina parâmetros da sessão
+                        let mut sign_input = Vec::new();
+                        if let Some(ref ct) = hs.ml_kem_ciphertext {
+                            sign_input.extend_from_slice(ct);
                         }
-                        None => {
-                            eprintln!("  ✗ No ML-KEM ek from {}", addr);
-                            continue;
-                        }
+                        sign_input.extend_from_slice(&hs.ephemeral_public.unwrap_or([0u8; 32]));
+                        sign_input.extend_from_slice(&hs.local_nonce);
+                        sign_input.extend_from_slice(&nonce);
+                        let signature = node.sign(&String::from_utf8_lossy(&sign_input));
+
+                        // Envia SessionKeyExchange com ciphertext + chave efêmera + assinatura
+                        let exchange = NetworkMessage::SessionKeyExchange {
+                            ml_kem_ciphertext: hs.ml_kem_ciphertext.clone().unwrap_or_default(),
+                            x25519_pubkey: hs.ephemeral_public.unwrap_or([0u8; 32]).to_vec(),
+                            signature,
+                        };
+                        let _ = transport.send(&exchange, addr).await;
+                        println!("  → Sent SessionKeyExchange to {}", addr);
+
+                        hs.phase = HandshakePhase::ResponseReceived;
+                        println!("  ✓ Waiting for SessionKeyConfirm from {}", addr);
+                        Ok(())
                     };
 
-                    // DH com chave efêmera do initiator
-                    let ephemeral_secret = hs.ephemeral_secret.take();
-                    let ephemeral_secret = match ephemeral_secret {
-                        Some(s) => s,
-                        None => {
-                            eprintln!("  ✗ Missing local ephemeral secret");
-                            continue;
-                        }
-                    };
-                    let initiator_ephemeral = x25519_dalek::PublicKey::from(key_arr);
-                    let x25519_shared = ephemeral_secret.diffie_hellman(&initiator_ephemeral);
-
-                    // Deriva chave de sessão híbrida
-                    let ml_kem_shared = ml_kem_shared.unwrap_or([0u8; 32]);
-                    let session_key = crate::network::crypto::derive_hybrid_session_key(
-                        x25519_shared.as_bytes(),
-                        &ml_kem_shared,
-                        &hs.local_nonce,
-                        &nonce,
-                    );
-
-                    // Salva chave de sessão para verificação no SessionKeyConfirm
-                    let session_key_bytes: [u8; 32] = session_key.into();
-                    hs.session_key = Some(session_key_bytes);
-
-                    // Assina parâmetros da sessão
-                    let mut sign_input = Vec::new();
-                    if let Some(ref ct) = hs.ml_kem_ciphertext {
-                        sign_input.extend_from_slice(ct);
+                    // MEM-2 FIX: Remove pending handshake em caso de falha
+                    if let Err(e) = result {
+                        eprintln!("  ✗ ChallengeResponse failed from {}: {}", addr, e);
+                        let mut pending = pending_handshakes.write().await;
+                        pending.remove(&addr);
                     }
-                    sign_input.extend_from_slice(&hs.ephemeral_public.unwrap_or([0u8; 32]));
-                    sign_input.extend_from_slice(&hs.local_nonce);
-                    sign_input.extend_from_slice(&nonce);
-                    let signature = node.sign(&String::from_utf8_lossy(&sign_input));
-
-                    // Envia SessionKeyExchange com ciphertext + chave efêmera + assinatura
-                    let exchange = NetworkMessage::SessionKeyExchange {
-                        ml_kem_ciphertext: hs.ml_kem_ciphertext.clone().unwrap_or_default(),
-                        x25519_pubkey: hs.ephemeral_public.unwrap_or([0u8; 32]).to_vec(),
-                        signature,
-                    };
-                    let _ = transport.send(&exchange, addr).await;
-                    println!("  → Sent SessionKeyExchange to {}", addr);
-
-                    // Armazena chave de sessão para verificar SessionKeyConfirm depois
-                    // (não adiciona peer ainda — espera confirmacao do initiator)
-                    let remote_nonce = nonce;
-                    let _ = session_key; // Usado na verificacao do SessionKeyConfirm
-
-                    // Salva sessão temporariamente (será confirmada no SessionKeyConfirm)
-                    // Nota: a sessão só é confirmada quando o initiator enviar SessionKeyConfirm
-                    hs.phase = HandshakePhase::ResponseReceived;
-                    println!("  ✓ Waiting for SessionKeyConfirm from {}", addr);
                 }
 
                 // Fase 4: SessionKeyExchange — Recebido pelo initiator
@@ -695,88 +732,100 @@ async fn run_udp_listener(
                 } => {
                     println!("Handshake: SessionKeyExchange from {}", addr);
 
-                    // Busca handshake pendente
-                    let mut pending = pending_handshakes.write().await;
-                    let hs = pending.get_mut(&addr);
-                    if hs.is_none() {
-                        eprintln!("  ✗ No pending handshake for {}", addr);
-                        continue;
-                    }
-                    let hs = hs.unwrap();
+                    // MEM-2 FIX: Usa bloco labelado para garantir cleanup em falhas
+                    let result: Result<(), String> = 'hs: {
+                        let mut pending = pending_handshakes.write().await;
+                        let hs = match pending.get_mut(&addr) {
+                            Some(hs) => hs,
+                            None => {
+                                eprintln!("  ✗ No pending handshake for {}", addr);
+                                break 'hs Ok(());
+                            }
+                        };
 
-                    // 1. Desencapsula ML-KEM
-                    let ml_kem_shared = match node.ml_kem_keypair.decapsulate(&ml_kem_ciphertext) {
-                        Ok(shared) => shared,
-                        Err(e) => {
-                            eprintln!("  ✗ ML-KEM decapsulation failed: {}", e);
-                            continue;
+                        // 1. Desencapsula ML-KEM
+                        let ml_kem_shared =
+                            match node.ml_kem_keypair.decapsulate(&ml_kem_ciphertext) {
+                                Ok(shared) => shared,
+                                Err(e) => {
+                                    break 'hs Err(format!("ML-KEM decapsulation failed: {}", e));
+                                }
+                            };
+                        hs.ml_kem_shared = Some(ml_kem_shared);
+
+                        // 2. DH com chave efêmera do respondedor
+                        if responder_ephemeral_pub.len() != 32 {
+                            break 'hs Err("Invalid responder ephemeral x25519 pubkey".to_string());
                         }
-                    };
-                    hs.ml_kem_shared = Some(ml_kem_shared);
+                        let mut responder_pub_arr = [0u8; 32];
+                        responder_pub_arr.copy_from_slice(&responder_ephemeral_pub);
 
-                    // 2. DH com chave efêmera do respondedor
-                    if responder_ephemeral_pub.len() != 32 {
-                        eprintln!("  ✗ Invalid responder ephemeral x25519 pubkey");
-                        continue;
-                    }
-                    let mut responder_pub_arr = [0u8; 32];
-                    responder_pub_arr.copy_from_slice(&responder_ephemeral_pub);
+                        let ephemeral_secret = match hs.ephemeral_secret.take() {
+                            Some(s) => s,
+                            None => {
+                                break 'hs Err("Missing local ephemeral secret".to_string());
+                            }
+                        };
+                        let x25519_shared = ephemeral_secret
+                            .diffie_hellman(&x25519_dalek::PublicKey::from(responder_pub_arr));
 
-                    let ephemeral_secret = match hs.ephemeral_secret.take() {
-                        Some(s) => s,
-                        None => {
-                            eprintln!("  ✗ Missing local ephemeral secret");
-                            continue;
+                        // 3. Deriva chave de sessão híbrida
+                        let session_key = crate::network::crypto::derive_hybrid_session_key(
+                            x25519_shared.as_bytes(),
+                            &ml_kem_shared,
+                            &hs.local_nonce,
+                            &hs.remote_nonce.unwrap_or([0u8; 32]),
+                        );
+
+                        // 4. Encripta "OK" para confirmar
+                        use chacha20poly1305::{
+                            aead::{Aead, KeyInit},
+                            ChaCha20Poly1305, Nonce,
+                        };
+                        let cipher = ChaCha20Poly1305::new(&session_key.into());
+                        let confirm_nonce = Nonce::from_slice(&[0u8; 12]);
+                        let encrypted_ok = cipher
+                            .encrypt(confirm_nonce, b"OK" as &[u8])
+                            .unwrap_or_default();
+
+                        // Envia SessionKeyConfirm
+                        let confirm = NetworkMessage::SessionKeyConfirm { encrypted_ok };
+                        let _ = transport.send(&confirm, addr).await;
+
+                        // Adiciona como peer confiável
+                        let remote_nonce = hs.remote_nonce.unwrap_or([0u8; 32]);
+                        let peer_x25519 = hs.remote_x25519_pubkey.unwrap_or([0u8; 32]);
+                        let mut trusted = trusted_peers.write().await;
+                        let peer = TrustedPeer {
+                            node_id: hs.remote_node_id.clone().unwrap_or_default(),
+                            public_key: hs.remote_ed25519_pubkey.clone().unwrap_or_default(),
+                            encryption_public_key: peer_x25519,
+                            addr,
+                            authenticated_at: chrono::Utc::now(),
+                        };
+
+                        if trusted.add(peer) {
+                            println!("  ✓ Peer {} authenticated and added to trusted list", addr);
+                            let session =
+                                SessionState::new(session_key, hs.local_nonce, remote_nonce);
+                            session_manager.insert(addr, session).await;
+                        } else {
+                            eprintln!("  ✗ Failed to add peer {} (list full?)", addr);
                         }
-                    };
-                    let x25519_shared = ephemeral_secret
-                        .diffie_hellman(&x25519_dalek::PublicKey::from(responder_pub_arr));
 
-                    // 3. Deriva chave de sessão híbrida
-                    let session_key = crate::network::crypto::derive_hybrid_session_key(
-                        x25519_shared.as_bytes(),
-                        &ml_kem_shared,
-                        &hs.local_nonce,
-                        &hs.remote_nonce.unwrap_or([0u8; 32]),
-                    );
-
-                    // 4. Encripta "OK" para confirmar
-                    use chacha20poly1305::{
-                        aead::{Aead, KeyInit},
-                        ChaCha20Poly1305, Nonce,
-                    };
-                    let cipher = ChaCha20Poly1305::new(&session_key.into());
-                    let confirm_nonce = Nonce::from_slice(&[0u8; 12]);
-                    let encrypted_ok = cipher
-                        .encrypt(confirm_nonce, b"OK" as &[u8])
-                        .unwrap_or_default();
-
-                    // Envia SessionKeyConfirm
-                    let confirm = NetworkMessage::SessionKeyConfirm { encrypted_ok };
-                    let _ = transport.send(&confirm, addr).await;
-
-                    // Adiciona como peer confiável
-                    let remote_nonce = hs.remote_nonce.unwrap_or([0u8; 32]);
-                    let peer_x25519 = hs.remote_x25519_pubkey.unwrap_or([0u8; 32]);
-                    let mut trusted = trusted_peers.write().await;
-                    let peer = TrustedPeer {
-                        node_id: hs.remote_node_id.clone().unwrap_or_default(),
-                        public_key: hs.remote_ed25519_pubkey.clone().unwrap_or_default(),
-                        encryption_public_key: peer_x25519,
-                        addr,
-                        authenticated_at: chrono::Utc::now(),
+                        hs.phase = HandshakePhase::Complete;
+                        Ok(())
                     };
 
-                    if trusted.add(peer) {
-                        println!("  ✓ Peer {} authenticated and added to trusted list", addr);
-                        let session = SessionState::new(session_key, hs.local_nonce, remote_nonce);
-                        session_manager.insert(addr, session).await;
+                    // MEM-2 FIX: Remove pending handshake em caso de falha
+                    if let Err(e) = result {
+                        eprintln!("  ✗ SessionKeyExchange failed from {}: {}", addr, e);
+                        let mut pending = pending_handshakes.write().await;
+                        pending.remove(&addr);
                     } else {
-                        eprintln!("  ✗ Failed to add peer {} (list full?)", addr);
+                        let mut pending = pending_handshakes.write().await;
+                        pending.remove(&addr);
                     }
-
-                    hs.phase = HandshakePhase::Complete;
-                    pending.remove(&addr);
                 }
 
                 // Fase 5: SessionKeyConfirm — Recebido pelo responder
@@ -866,9 +915,8 @@ async fn run_udp_listener(
                     // Decripta mensagem
                     match secure_msg.decrypt(&session.session_key) {
                         Ok((counter, payload)) => {
-                            // Verifica anti-replay
-                            let mut session_mut = session.clone();
-                            if !session_mut.check_counter(counter) {
+                            // Verifica anti-replay diretamente na sessão armazenada (sem clone-discard)
+                            if !session_manager.check_counter(&addr, counter).await {
                                 eprintln!(
                                     "  ✗ Replay detected from {} (counter={})",
                                     addr, counter

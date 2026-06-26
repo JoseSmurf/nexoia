@@ -110,7 +110,7 @@ pub struct EncryptedEpaRequest {
     pub recipient_public_key: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct QuickVerifyResponse {
     pub signature_valid: bool,
     pub epa_id: String,
@@ -275,21 +275,52 @@ async fn verify_quick_endpoint(
 mod tests {
     use super::*;
     use crate::network::identity::NodeIdentity;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
 
-    #[tokio::test]
-    async fn health_endpoint_returns_ok() {
+    fn test_state() -> ApiState {
         let node = NodeIdentity::generate("test");
-        let state = ApiState {
+        ApiState {
             node_id: node.node_id.clone(),
             public_key: node.public_key.clone(),
             node_identity: node.clone(),
             epas: Arc::new(RwLock::new(Vec::new())),
             rate_limiter: RateLimiter::new(100, Duration::from_secs(60)),
-        };
-
-        assert_eq!(state.node_id.len(), 64);
-        assert_eq!(state.epas.read().await.len(), 0);
+        }
     }
+
+    fn test_app() -> Router {
+        let state = test_state();
+        Router::new()
+            .route("/health", get(health))
+            .route("/node", get(node_info))
+            .route("/epa", post(receive_epa))
+            .route("/epa/encrypted", post(receive_encrypted_epa))
+            .route("/epa/list", get(list_epas))
+            .route("/epa/:id/verify", post(verify_epa_endpoint))
+            .route("/epa/:id/verify-quick", get(verify_quick_endpoint))
+            .with_state(state)
+    }
+
+    // ── Health ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn health_endpoint_returns_ok() {
+        let app = test_app();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    // ── Rate Limiter ────────────────────────────────────────
 
     #[tokio::test]
     async fn rate_limiter_blocks_after_limit() {
@@ -323,5 +354,306 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         assert!(limiter.check(ip).await);
+    }
+
+    // ── POST /epa/encrypted ─────────────────────────────────
+
+    #[tokio::test]
+    async fn encrypted_epa_valid_request() {
+        let app = test_app();
+        let recipient = NodeIdentity::generate("recipient");
+        let recipient_pub = hex::encode(&recipient.encryption_keypair.public_bytes()[..32]);
+
+        let body = serde_json::to_string(&serde_json::json!({
+            "state_json": r#"{"project":"test"}"#,
+            "evidence_jsonl": r#"{"evidence":"ok"}"#,
+            "decisions_jsonl": r#"{"decision":"ok"}"#,
+            "manifest_json": r#"{"manifest":"v1"}"#,
+            "recipient_public_key": recipient_pub,
+        }))
+        .unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/epa/encrypted")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let epa: SharedEPA = serde_json::from_slice(&body_bytes).unwrap();
+        assert!(!epa.epa_id.is_empty());
+        assert!(epa.encrypted_payload.is_some());
+        assert!(epa.ephemeral_public_key.is_some());
+    }
+
+    #[tokio::test]
+    async fn encrypted_epa_invalid_hex_key() {
+        let app = test_app();
+
+        let body = serde_json::to_string(&serde_json::json!({
+            "state_json": r#"{"project":"test"}"#,
+            "evidence_jsonl": r#"{"evidence":"ok"}"#,
+            "decisions_jsonl": r#"{"decision":"ok"}"#,
+            "manifest_json": r#"{"manifest":"v1"}"#,
+            "recipient_public_key": "not-valid-hex!!!",
+        }))
+        .unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/epa/encrypted")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn encrypted_epa_key_wrong_length() {
+        let app = test_app();
+
+        let body = serde_json::to_string(&serde_json::json!({
+            "state_json": r#"{"project":"test"}"#,
+            "evidence_jsonl": r#"{"evidence":"ok"}"#,
+            "decisions_jsonl": r#"{"decision":"ok"}"#,
+            "manifest_json": r#"{"manifest":"v1"}"#,
+            "recipient_public_key": "ab", // 1 byte, needs 32
+        }))
+        .unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/epa/encrypted")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn encrypted_epa_missing_field() {
+        let app = test_app();
+
+        let body = serde_json::to_string(&serde_json::json!({
+            "state_json": r#"{"project":"test"}"#,
+            "evidence_jsonl": r#"{"evidence":"ok"}"#,
+            "decisions_jsonl": r#"{"decision":"ok"}"#,
+            // missing manifest_json and recipient_public_key
+        }))
+        .unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/epa/encrypted")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY); // 422
+    }
+
+    // ── GET /epa/{id}/verify-quick ──────────────────────────
+
+    #[tokio::test]
+    async fn verify_quick_existing_epa() {
+        let state = test_state();
+        let node = state.node_identity.clone();
+
+        let epa = SharedEPA::create(
+            &node,
+            r#"{"project":"test"}"#,
+            r#"{"evidence":"ok"}"#,
+            r#"{"decision":"ok"}"#,
+            r#"{"manifest":"v1"}"#,
+        );
+        let epa_id = epa.epa_id.clone();
+
+        state.epas.write().await.push(epa);
+
+        let app = Router::new()
+            .route("/epa/:id/verify-quick", get(verify_quick_endpoint))
+            .with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/epa/{}/verify-quick", epa_id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let resp: QuickVerifyResponse = serde_json::from_slice(&body_bytes).unwrap();
+        assert!(resp.signature_valid);
+        assert_eq!(resp.epa_id, epa_id);
+    }
+
+    #[tokio::test]
+    async fn verify_quick_nonexistent_epa() {
+        let state = test_state();
+
+        let app = Router::new()
+            .route("/epa/:id/verify-quick", get(verify_quick_endpoint))
+            .with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/epa/nonexistent_id/verify-quick")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn verify_quick_tampered_epa() {
+        let state = test_state();
+        let node = state.node_identity.clone();
+
+        let mut epa = SharedEPA::create(
+            &node,
+            r#"{"project":"test"}"#,
+            r#"{"evidence":"ok"}"#,
+            r#"{"decision":"ok"}"#,
+            r#"{"manifest":"v1"}"#,
+        );
+        let epa_id = epa.epa_id.clone();
+
+        // Tamper with the state_hash — breaks integrity but signature check
+        // still passes (signature is over original integrity_hash, not state_hash)
+        epa.state_hash = "tampered".to_string();
+        state.epas.write().await.push(epa);
+
+        let app = Router::new()
+            .route("/epa/:id/verify-quick", get(verify_quick_endpoint))
+            .with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/epa/{}/verify-quick", epa_id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let resp: QuickVerifyResponse = serde_json::from_slice(&body_bytes).unwrap();
+        // verify_quick only checks Ed25519 signature, not integrity
+        assert!(resp.signature_valid);
+        assert_eq!(resp.epa_id, epa_id);
+    }
+
+    // ── POST /epa (receive_epa) ─────────────────────────────
+
+    #[tokio::test]
+    async fn receive_epa_valid() {
+        let state = test_state();
+        let node = state.node_identity.clone();
+
+        let epa = SharedEPA::create(
+            &node,
+            r#"{"project":"test"}"#,
+            r#"{"evidence":"ok"}"#,
+            r#"{"decision":"ok"}"#,
+            r#"{"manifest":"v1"}"#,
+        );
+
+        let app = Router::new()
+            .route("/epa", post(receive_epa))
+            .with_state(state.clone());
+
+        let body = serde_json::to_string(&epa).unwrap();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/epa")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(state.epas.read().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn receive_epa_tampered_rejected() {
+        let state = test_state();
+        let node = state.node_identity.clone();
+
+        let mut epa = SharedEPA::create(
+            &node,
+            r#"{"project":"test"}"#,
+            r#"{"evidence":"ok"}"#,
+            r#"{"decision":"ok"}"#,
+            r#"{"manifest":"v1"}"#,
+        );
+        epa.state_hash = "tampered".to_string();
+
+        let app = Router::new()
+            .route("/epa", post(receive_epa))
+            .with_state(state.clone());
+
+        let body = serde_json::to_string(&epa).unwrap();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/epa")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(state.epas.read().await.len(), 0);
     }
 }

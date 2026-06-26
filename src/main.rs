@@ -50,6 +50,8 @@ use x25519_dalek::EphemeralSecret;
 // ║  2. sessions     (SessionManager)                   ║
 // ║  3. peers        (PeerList / TrustedPeerList)       ║
 // ║  4. reputation   (ReputationStore)                  ║
+// ║  5. epas         (Vec<SharedEPA>)                   ║
+// ║  6. lgpd_index   (LgpdIndex)                        ║
 // ╚══════════════════════════════════════════════════════╝
 
 struct Config {

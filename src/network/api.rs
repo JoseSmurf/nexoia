@@ -317,6 +317,8 @@ async fn titular_export(
 }
 
 /// DELETE /titular/:hash — anonimiza dados pessoais + gera EPA de supressão.
+/// Lock order: lgpd_index (read) -> epas (write) -> lgpd_index (write)
+/// epas lock is dropped BEFORE broadcast_epa (which acquires peers lock)
 async fn titular_anonymize(
     State(state): State<ApiState>,
     axum::extract::Path(hash): axum::extract::Path<String>,
@@ -330,31 +332,39 @@ async fn titular_anonymize(
     }
 
     let mut results = Vec::new();
-    let mut epas = state.epas.write().await;
+    let mut suppressions = Vec::new();
 
-    for epa_ref in &refs {
-        if let Some(epa) = epas.iter_mut().find(|e| e.epa_id == epa_ref.epa_id) {
-            let fields = lgpd_rights::anonymize_epa_fields(epa);
+    {
+        let mut epas = state.epas.write().await;
 
-            let suppression = lgpd_rights::create_suppression_epa(&state.node_identity, epa);
+        for epa_ref in &refs {
+            if let Some(epa) = epas.iter_mut().find(|e| e.epa_id == epa_ref.epa_id) {
+                let fields = lgpd_rights::anonymize_epa_fields(epa);
 
-            let result = AnonymizationResult {
-                original_epa_id: epa_ref.epa_id.clone(),
-                suppression_epa_id: suppression.epa_id.clone(),
-                fields_anonymized: fields,
-                timestamp: chrono::Utc::now(),
-            };
+                let suppression = lgpd_rights::create_suppression_epa(&state.node_identity, epa);
 
-            if epas.len() >= MAX_EPA_ENTRIES {
-                epas.remove(0);
+                let result = AnonymizationResult {
+                    original_epa_id: epa_ref.epa_id.clone(),
+                    suppression_epa_id: suppression.epa_id.clone(),
+                    fields_anonymized: fields,
+                    timestamp: chrono::Utc::now(),
+                };
+
+                if epas.len() >= MAX_EPA_ENTRIES {
+                    epas.remove(0);
+                }
+                epas.push(suppression.clone());
+                suppressions.push(suppression);
+
+                results.push(result);
             }
-            epas.push(suppression.clone());
-            broadcast_epa(&state, &suppression).await;
-
-            results.push(result);
         }
+    } // epas lock dropped here
+
+    // Broadcast suppression EPAs (acquires peers lock - must come after epas lock)
+    for suppression in &suppressions {
+        broadcast_epa(&state, suppression).await;
     }
-    drop(epas);
 
     // Atualiza índice
     let mut index = state.lgpd_index.write().await;

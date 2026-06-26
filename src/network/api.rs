@@ -62,6 +62,7 @@ pub struct EncryptedEpaRequest {
 #[derive(Serialize, Deserialize)]
 pub struct QuickVerifyResponse {
     pub signature_valid: bool,
+    pub integrity_valid: bool,
     pub epa_id: String,
 }
 
@@ -282,9 +283,11 @@ async fn verify_quick_endpoint(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let signature_valid = epa.verify_signature().is_ok();
+    let integrity_valid = epa.verify_integrity();
 
     Ok(Json(QuickVerifyResponse {
         signature_valid,
+        integrity_valid,
         epa_id: epa.epa_id.clone(),
     }))
 }

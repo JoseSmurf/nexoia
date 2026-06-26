@@ -354,5 +354,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .await?;
     println!("\nNode running. Press Ctrl+C to stop.");
     tokio::signal::ctrl_c().await?;
+
+    // Graceful shutdown: save state before exiting
+    println!("Shutting down... saving state");
+    if let Err(e) = reputation.read().await.save() {
+        eprintln!("Failed to save reputation: {}", e);
+    }
+    persistence::save_network_state(&data_path, &peers, &epas, &trusted_peers).await;
+    println!("State saved. Goodbye!");
+
     Ok(())
 }

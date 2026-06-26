@@ -1,5 +1,6 @@
 use crate::limits::MAX_EPA_ENTRIES;
 use crate::network::epa::SharedEPA;
+use crate::network::identity::NodeIdentity;
 use crate::network::verify::{verify_epa, VerifyResult};
 use axum::{
     extract::{ConnectInfo, Json, State},
@@ -9,7 +10,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -77,6 +78,7 @@ impl RateLimiter {
 pub struct ApiState {
     pub node_id: String,
     pub public_key: String,
+    pub node_identity: NodeIdentity,
     pub epas: Arc<RwLock<Vec<SharedEPA>>>,
     pub rate_limiter: RateLimiter,
 }
@@ -96,6 +98,21 @@ pub struct NodeListResponse {
 #[derive(Serialize)]
 pub struct VerifyResponse {
     pub result: String,
+    pub epa_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct EncryptedEpaRequest {
+    pub state_json: String,
+    pub evidence_jsonl: String,
+    pub decisions_jsonl: String,
+    pub manifest_json: String,
+    pub recipient_public_key: String,
+}
+
+#[derive(Serialize)]
+pub struct QuickVerifyResponse {
+    pub signature_valid: bool,
     pub epa_id: String,
 }
 
@@ -123,8 +140,10 @@ pub async fn create_api(state: ApiState, addr: SocketAddr) -> Result<(), std::io
         .route("/health", get(health))
         .route("/node", get(node_info))
         .route("/epa", post(receive_epa))
+        .route("/epa/encrypted", post(receive_encrypted_epa))
         .route("/epa/list", get(list_epas))
         .route("/epa/:id/verify", post(verify_epa_endpoint))
+        .route("/epa/:id/verify-quick", get(verify_quick_endpoint))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             rate_limit_middleware,
@@ -203,6 +222,55 @@ async fn verify_epa_endpoint(
     }))
 }
 
+async fn receive_encrypted_epa(
+    State(state): State<ApiState>,
+    Json(req): Json<EncryptedEpaRequest>,
+) -> Result<Json<SharedEPA>, StatusCode> {
+    let recipient_key_bytes =
+        hex::decode(&req.recipient_public_key).map_err(|_| StatusCode::BAD_REQUEST)?;
+    if recipient_key_bytes.len() != 32 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let mut key_arr = [0u8; 32];
+    key_arr.copy_from_slice(&recipient_key_bytes);
+
+    let epa = SharedEPA::create_encrypted(
+        &state.node_identity,
+        &req.state_json,
+        &req.evidence_jsonl,
+        &req.decisions_jsonl,
+        &req.manifest_json,
+        &key_arr,
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let mut epas = state.epas.write().await;
+    if epas.len() >= MAX_EPA_ENTRIES {
+        epas.remove(0);
+    }
+    epas.push(epa.clone());
+
+    Ok(Json(epa))
+}
+
+async fn verify_quick_endpoint(
+    State(state): State<ApiState>,
+    axum::extract::Path(epa_id): axum::extract::Path<String>,
+) -> Result<Json<QuickVerifyResponse>, StatusCode> {
+    let epas = state.epas.read().await;
+    let epa = epas
+        .iter()
+        .find(|e| e.epa_id == epa_id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let signature_valid = epa.verify_signature().is_ok();
+
+    Ok(Json(QuickVerifyResponse {
+        signature_valid,
+        epa_id: epa.epa_id.clone(),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,6 +282,7 @@ mod tests {
         let state = ApiState {
             node_id: node.node_id.clone(),
             public_key: node.public_key.clone(),
+            node_identity: node.clone(),
             epas: Arc::new(RwLock::new(Vec::new())),
             rate_limiter: RateLimiter::new(100, Duration::from_secs(60)),
         };

@@ -301,6 +301,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let api_state = ApiState {
         node_id: node.node_id.clone(),
         public_key: node.public_key.clone(),
+        node_identity: node.clone(),
         epas: Arc::clone(&epas),
         rate_limiter: api::RateLimiter::new(100, Duration::from_secs(60)),
     };

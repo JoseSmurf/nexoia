@@ -220,18 +220,15 @@ impl TrustedPeerList {
 
 /// UDP Transport para comunicação entre nós.
 /// Usa length-prefix framing para prevenir truncamento de mensagens.
+/// Compartilhado via `Arc<UdpTransport>`. O socket UDP permite `send_to` concorrente com `recv_from`.
 pub struct UdpTransport {
     socket: UdpSocket,
-    recv_buffer: [u8; 65536],
 }
 
 impl UdpTransport {
     pub async fn bind(addr: SocketAddr) -> Result<Self, std::io::Error> {
         let socket = UdpSocket::bind(addr).await?;
-        Ok(Self {
-            socket,
-            recv_buffer: [0; 65536],
-        })
+        Ok(Self { socket })
     }
 
     /// Envia mensagem com length-prefix framing (4 bytes big-endian).
@@ -280,8 +277,11 @@ impl UdpTransport {
     }
 
     /// Recebe mensagem com length-prefix framing.
-    pub async fn recv(&mut self) -> Result<(NetworkMessage, SocketAddr), std::io::Error> {
-        let (len, addr) = self.socket.recv_from(&mut self.recv_buffer).await?;
+    pub async fn recv(
+        &self,
+        buf: &mut [u8; 65536],
+    ) -> Result<(NetworkMessage, SocketAddr), std::io::Error> {
+        let (len, addr) = self.socket.recv_from(buf).await?;
 
         if len < 4 {
             return Err(std::io::Error::new(
@@ -292,7 +292,7 @@ impl UdpTransport {
 
         // Lê length prefix
         let mut len_bytes = [0u8; 4];
-        len_bytes.copy_from_slice(&self.recv_buffer[..4]);
+        len_bytes.copy_from_slice(&buf[..4]);
         let expected_len = u32::from_be_bytes(len_bytes) as usize;
 
         if len < 4 + expected_len {
@@ -302,7 +302,7 @@ impl UdpTransport {
             ));
         }
 
-        let msg: NetworkMessage = serde_json::from_slice(&self.recv_buffer[4..4 + expected_len])
+        let msg: NetworkMessage = serde_json::from_slice(&buf[4..4 + expected_len])
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         Ok((msg, addr))

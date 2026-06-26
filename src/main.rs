@@ -147,7 +147,7 @@ fn spawn_tasks(
     peer_states: &Arc<RwLock<HashMap<SocketAddr, PeerState>>>,
     sm: &Arc<SessionManager>,
     pending: &Arc<RwLock<HashMap<SocketAddr, PendingHandshake>>>,
-    udp_socket: UdpTransport,
+    udp_socket: Arc<UdpTransport>,
     data_path: &std::path::Path,
     api_state: ApiState,
     api_addr: SocketAddr,
@@ -283,7 +283,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let peer_states: Arc<RwLock<HashMap<SocketAddr, PeerState>>> =
         Arc::new(RwLock::new(HashMap::new()));
     let udp_addr: SocketAddr = ([127, 0, 0, 1], cfg.udp_port).into();
-    let udp_socket = UdpTransport::bind(udp_addr).await?;
+    let udp_socket = Arc::new(UdpTransport::bind(udp_addr).await?);
     let api_addr: SocketAddr = ([127, 0, 0, 1], cfg.api_port).into();
     println!("Network:      UDP listening on {}", udp_addr);
     if cfg.disable_encryption {
@@ -303,6 +303,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         public_key: node.public_key.clone(),
         node_identity: node.clone(),
         epas: Arc::clone(&epas),
+        peers: Arc::clone(&peers),
+        transport: Arc::clone(&udp_socket),
         rate_limiter: api::RateLimiter::new(100, Duration::from_secs(60)),
     };
     spawn_tasks(

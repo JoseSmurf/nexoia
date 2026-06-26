@@ -13,7 +13,7 @@ async fn two_nodes_can_communicate() {
     let addr_b: SocketAddr = "127.0.0.1:19101".parse().unwrap();
 
     let transport_a = UdpTransport::bind(addr_a).await.unwrap();
-    let mut transport_b = UdpTransport::bind(addr_b).await.unwrap();
+    let transport_b = UdpTransport::bind(addr_b).await.unwrap();
 
     let ping = NetworkMessage::Ping {
         node_id: node_a.node_id.clone(),
@@ -21,7 +21,8 @@ async fn two_nodes_can_communicate() {
 
     transport_a.send(&ping, addr_b).await.unwrap();
 
-    let (msg, from) = transport_b.recv().await.unwrap();
+    let mut buf = [0u8; 65536];
+    let (msg, from) = transport_b.recv(&mut buf).await.unwrap();
     assert!(matches!(msg, NetworkMessage::Ping { .. }));
     assert_eq!(from, addr_a);
 }
@@ -34,7 +35,7 @@ async fn epa_sharing_between_nodes() {
     let addr_b: SocketAddr = "127.0.0.1:19103".parse().unwrap();
 
     let transport_a = UdpTransport::bind(addr_a).await.unwrap();
-    let mut transport_b = UdpTransport::bind(addr_b).await.unwrap();
+    let transport_b = UdpTransport::bind(addr_b).await.unwrap();
 
     let state = r#"{"project":"test"}"#;
     let evidence = r#"{"evidence":"data"}"#;
@@ -46,7 +47,8 @@ async fn epa_sharing_between_nodes() {
     let msg = NetworkMessage::EPA(epa.clone());
     transport_a.send(&msg, addr_b).await.unwrap();
 
-    let (received, _) = transport_b.recv().await.unwrap();
+    let mut buf = [0u8; 65536];
+    let (received, _) = transport_b.recv(&mut buf).await.unwrap();
     if let NetworkMessage::EPA(received_epa) = received {
         assert!(received_epa.verify_full().is_ok());
         assert_eq!(received_epa.epa_id, epa.epa_id);

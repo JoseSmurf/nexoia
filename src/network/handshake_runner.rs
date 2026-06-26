@@ -22,7 +22,7 @@ use tokio::sync::RwLock;
 
 /// Listener UDP com handshake e verificação assíncrona de EPA.
 pub async fn run_udp_listener(
-    mut transport: UdpTransport,
+    transport: Arc<UdpTransport>,
     node: NodeIdentity,
     epas: Arc<RwLock<Vec<SharedEPA>>>,
     peers: Arc<RwLock<PeerList>>,
@@ -34,8 +34,9 @@ pub async fn run_udp_listener(
     session_manager: Arc<SessionManager>,
     pending_handshakes: Arc<RwLock<HashMap<SocketAddr, PendingHandshake>>>,
 ) {
+    let mut recv_buf = [0u8; 65536];
     loop {
-        match transport.recv().await {
+        match transport.recv(&mut recv_buf).await {
             Ok((msg, addr)) => match msg {
                 // ============================================
                 // HANDSHAKE (4 fases)

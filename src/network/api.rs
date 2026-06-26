@@ -1,6 +1,7 @@
 use crate::limits::MAX_EPA_ENTRIES;
 use crate::network::epa::SharedEPA;
 use crate::network::identity::NodeIdentity;
+use crate::network::transport::{NetworkMessage, PeerList, UdpTransport};
 use crate::network::verify::{verify_epa, VerifyResult};
 use axum::{
     extract::{ConnectInfo, Json, State},
@@ -80,6 +81,8 @@ pub struct ApiState {
     pub public_key: String,
     pub node_identity: NodeIdentity,
     pub epas: Arc<RwLock<Vec<SharedEPA>>>,
+    pub peers: Arc<RwLock<PeerList>>,
+    pub transport: Arc<UdpTransport>,
     pub rate_limiter: RateLimiter,
 }
 
@@ -114,6 +117,33 @@ pub struct EncryptedEpaRequest {
 pub struct QuickVerifyResponse {
     pub signature_valid: bool,
     pub epa_id: String,
+}
+
+/// Broadcasts EPA to all known peers via UDP.
+async fn broadcast_epa(state: &ApiState, epa: &SharedEPA) {
+    let peer_list = state.peers.read().await;
+    let addrs: Vec<SocketAddr> = peer_list.peers().to_vec();
+    drop(peer_list);
+
+    if addrs.is_empty() {
+        return;
+    }
+
+    let msg = NetworkMessage::EPA(epa.clone());
+    let mut sent = 0usize;
+    for addr in &addrs {
+        if state.transport.send(&msg, *addr).await.is_ok() {
+            sent += 1;
+        }
+    }
+    if sent > 0 {
+        println!(
+            "→ Broadcast EPA {} to {}/{} peers",
+            epa.epa_id,
+            sent,
+            addrs.len()
+        );
+    }
 }
 
 /// Middleware de rate limiting.
@@ -189,7 +219,9 @@ async fn receive_epa(
                 // Evict oldest (first element)
                 epas.remove(0);
             }
-            epas.push(epa);
+            epas.push(epa.clone());
+            drop(epas);
+            broadcast_epa(&state, &epa).await;
             Ok(Json(ApiResponse {
                 status: "accepted".to_string(),
                 message: "EPA received and verified".to_string(),
@@ -277,6 +309,9 @@ async fn receive_encrypted_epa(
         epas.remove(0);
     }
     epas.push(epa.clone());
+    drop(epas);
+
+    broadcast_epa(&state, &epa).await;
 
     Ok(Json(epa))
 }
@@ -307,19 +342,25 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
-    fn test_state() -> ApiState {
+    async fn test_state() -> ApiState {
         let node = NodeIdentity::generate("test");
+        let transport = Arc::new(
+            UdpTransport::bind("127.0.0.1:0".parse().unwrap())
+                .await
+                .unwrap(),
+        );
         ApiState {
             node_id: node.node_id.clone(),
             public_key: node.public_key.clone(),
             node_identity: node.clone(),
             epas: Arc::new(RwLock::new(Vec::new())),
+            peers: Arc::new(RwLock::new(PeerList::new(10))),
+            transport,
             rate_limiter: RateLimiter::new(100, Duration::from_secs(60)),
         }
     }
 
-    fn test_app() -> Router {
-        let state = test_state();
+    fn test_app(state: ApiState) -> Router {
         Router::new()
             .route("/health", get(health))
             .route("/node", get(node_info))
@@ -335,7 +376,8 @@ mod tests {
 
     #[tokio::test]
     async fn health_endpoint_returns_ok() {
-        let app = test_app();
+        let state = test_state().await;
+        let app = test_app(state);
         let response = app
             .oneshot(
                 Request::builder()
@@ -388,7 +430,8 @@ mod tests {
 
     #[tokio::test]
     async fn encrypted_epa_valid_request() {
-        let app = test_app();
+        let state = test_state().await;
+        let app = test_app(state);
         let recipient = NodeIdentity::generate("recipient");
         let recipient_pub = hex::encode(&recipient.encryption_keypair.public_bytes()[..32]);
 
@@ -426,7 +469,8 @@ mod tests {
 
     #[tokio::test]
     async fn encrypted_epa_invalid_hex_key() {
-        let app = test_app();
+        let state = test_state().await;
+        let app = test_app(state);
 
         let body = serde_json::to_string(&serde_json::json!({
             "state_json": r#"{"project":"test"}"#,
@@ -460,7 +504,8 @@ mod tests {
 
     #[tokio::test]
     async fn encrypted_epa_key_wrong_length() {
-        let app = test_app();
+        let state = test_state().await;
+        let app = test_app(state);
 
         let body = serde_json::to_string(&serde_json::json!({
             "state_json": r#"{"project":"test"}"#,
@@ -494,7 +539,8 @@ mod tests {
 
     #[tokio::test]
     async fn encrypted_epa_missing_field() {
-        let app = test_app();
+        let state = test_state().await;
+        let app = test_app(state);
 
         let body = serde_json::to_string(&serde_json::json!({
             "state_json": r#"{"project":"test"}"#,
@@ -523,7 +569,7 @@ mod tests {
 
     #[tokio::test]
     async fn verify_quick_existing_epa() {
-        let state = test_state();
+        let state = test_state().await;
         let node = state.node_identity.clone();
 
         let epa = SharedEPA::create(
@@ -563,7 +609,7 @@ mod tests {
 
     #[tokio::test]
     async fn verify_quick_nonexistent_epa() {
-        let state = test_state();
+        let state = test_state().await;
 
         let app = Router::new()
             .route("/epa/:id/verify-quick", get(verify_quick_endpoint))
@@ -584,7 +630,7 @@ mod tests {
 
     #[tokio::test]
     async fn verify_quick_tampered_epa() {
-        let state = test_state();
+        let state = test_state().await;
         let node = state.node_identity.clone();
 
         let mut epa = SharedEPA::create(
@@ -630,7 +676,7 @@ mod tests {
 
     #[tokio::test]
     async fn receive_epa_valid() {
-        let state = test_state();
+        let state = test_state().await;
         let node = state.node_identity.clone();
 
         let epa = SharedEPA::create(
@@ -664,7 +710,7 @@ mod tests {
 
     #[tokio::test]
     async fn receive_epa_tampered_rejected() {
-        let state = test_state();
+        let state = test_state().await;
         let node = state.node_identity.clone();
 
         let mut epa = SharedEPA::create(

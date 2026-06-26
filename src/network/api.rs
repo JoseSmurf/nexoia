@@ -222,15 +222,36 @@ async fn verify_epa_endpoint(
     }))
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ErrorResponse {
+    pub error: String,
+}
+
 async fn receive_encrypted_epa(
     State(state): State<ApiState>,
     Json(req): Json<EncryptedEpaRequest>,
-) -> Result<Json<SharedEPA>, StatusCode> {
-    let recipient_key_bytes =
-        hex::decode(&req.recipient_public_key).map_err(|_| StatusCode::BAD_REQUEST)?;
+) -> Result<Json<SharedEPA>, (StatusCode, Json<ErrorResponse>)> {
+    let recipient_key_bytes = hex::decode(&req.recipient_public_key).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("invalid hex in recipient_public_key: {}", e),
+            }),
+        )
+    })?;
+
     if recipient_key_bytes.len() != 32 {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!(
+                    "recipient_public_key must be 32 bytes, got {}",
+                    recipient_key_bytes.len()
+                ),
+            }),
+        ));
     }
+
     let mut key_arr = [0u8; 32];
     key_arr.copy_from_slice(&recipient_key_bytes);
 
@@ -242,7 +263,14 @@ async fn receive_encrypted_epa(
         &req.manifest_json,
         &key_arr,
     )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("encryption failed: {}", e),
+            }),
+        )
+    })?;
 
     let mut epas = state.epas.write().await;
     if epas.len() >= MAX_EPA_ENTRIES {
@@ -422,6 +450,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let err: ErrorResponse = serde_json::from_slice(&body_bytes).unwrap();
+        assert!(err.error.contains("invalid hex"));
     }
 
     #[tokio::test]
@@ -450,6 +484,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let err: ErrorResponse = serde_json::from_slice(&body_bytes).unwrap();
+        assert!(err.error.contains("32 bytes"));
     }
 
     #[tokio::test]

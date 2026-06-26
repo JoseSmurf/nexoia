@@ -1,3 +1,4 @@
+use crate::defense::RateLimiter;
 use crate::lgpd_rights::{
     self, AnonymizationResult, EpaRef, LgpdIndex, RevocationResult, TitularExport,
 };
@@ -15,68 +16,10 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::RwLock;
-
-/// Rate limiter simples por IP.
-/// Mantém janela de requisições e rejeita se exceder o limite.
-struct RateLimiterInner {
-    /// Mapa de IP → (count, window_start)
-    clients: HashMap<IpAddr, ClientRate>,
-    max_requests: u32,
-    window: Duration,
-}
-
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct IpAddr(std::net::IpAddr);
-
-struct ClientRate {
-    count: u32,
-    window_start: Instant,
-}
-
-#[derive(Clone)]
-pub struct RateLimiter {
-    inner: Arc<RwLock<RateLimiterInner>>,
-}
-
-impl RateLimiter {
-    pub fn new(max_requests: u32, window: Duration) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(RateLimiterInner {
-                clients: HashMap::new(),
-                max_requests,
-                window,
-            })),
-        }
-    }
-
-    async fn check(&self, ip: std::net::IpAddr) -> bool {
-        let mut inner = self.inner.write().await;
-        let now = Instant::now();
-        let key = IpAddr(ip);
-
-        let window = inner.window;
-        let max_requests = inner.max_requests;
-
-        let client = inner.clients.entry(key).or_insert(ClientRate {
-            count: 0,
-            window_start: now,
-        });
-
-        // Reset janela se expirou
-        if now.duration_since(client.window_start) >= window {
-            client.count = 0;
-            client.window_start = now;
-        }
-
-        client.count += 1;
-        client.count <= max_requests
-    }
-}
 
 #[derive(Clone)]
 pub struct ApiState {
@@ -87,7 +30,7 @@ pub struct ApiState {
     pub peers: Arc<RwLock<PeerList>>,
     pub transport: Arc<UdpTransport>,
     pub lgpd_index: Arc<RwLock<LgpdIndex>>,
-    pub rate_limiter: RateLimiter,
+    pub rate_limiter: Arc<RateLimiter>,
 }
 
 #[derive(Serialize)]
@@ -162,7 +105,8 @@ async fn rate_limit_middleware(
         return Ok(next.run(request).await);
     }
 
-    if !state.rate_limiter.check(addr.ip()).await {
+    let key = addr.ip().to_string();
+    if !state.rate_limiter.check(&key) {
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
 
@@ -483,7 +427,7 @@ mod tests {
             peers: Arc::new(RwLock::new(PeerList::new(10))),
             transport,
             lgpd_index: Arc::new(RwLock::new(LgpdIndex::new())),
-            rate_limiter: RateLimiter::new(100, Duration::from_secs(60)),
+            rate_limiter: Arc::new(RateLimiter::new(100, Duration::from_secs(60))),
         }
     }
 
@@ -526,35 +470,31 @@ mod tests {
     #[tokio::test]
     async fn rate_limiter_blocks_after_limit() {
         let limiter = RateLimiter::new(2, Duration::from_secs(1));
-        let ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
 
-        assert!(limiter.check(ip).await);
-        assert!(limiter.check(ip).await);
-        assert!(!limiter.check(ip).await);
+        assert!(limiter.check("127.0.0.1"));
+        assert!(limiter.check("127.0.0.1"));
+        assert!(!limiter.check("127.0.0.1"));
     }
 
     #[tokio::test]
     async fn rate_limiter_allows_different_ips() {
         let limiter = RateLimiter::new(1, Duration::from_secs(1));
-        let ip1: std::net::IpAddr = "127.0.0.1".parse().unwrap();
-        let ip2: std::net::IpAddr = "127.0.0.2".parse().unwrap();
 
-        assert!(limiter.check(ip1).await);
-        assert!(limiter.check(ip2).await);
-        assert!(!limiter.check(ip1).await);
+        assert!(limiter.check("127.0.0.1"));
+        assert!(limiter.check("127.0.0.2"));
+        assert!(!limiter.check("127.0.0.1"));
     }
 
     #[tokio::test]
     async fn rate_limiter_resets_after_window() {
         let limiter = RateLimiter::new(1, Duration::from_millis(100));
-        let ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
 
-        assert!(limiter.check(ip).await);
-        assert!(!limiter.check(ip).await);
+        assert!(limiter.check("127.0.0.1"));
+        assert!(!limiter.check("127.0.0.1"));
 
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        std::thread::sleep(Duration::from_millis(150));
 
-        assert!(limiter.check(ip).await);
+        assert!(limiter.check("127.0.0.1"));
     }
 
     // ── POST /epa/encrypted ─────────────────────────────────

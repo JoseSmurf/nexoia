@@ -1,5 +1,7 @@
 #![allow(dead_code, unused_imports)]
 
+#[path = "../defense.rs"]
+mod defense;
 #[path = "../hash.rs"]
 mod hash;
 #[path = "../lgpd.rs"]

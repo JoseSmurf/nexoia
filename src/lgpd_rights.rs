@@ -8,8 +8,6 @@ use crate::network::identity::NodeIdentity;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Referência a um EPA associado a um titular (data subject).
 /// Derivado dos EPAs existentes — não é fonte de verdade.
@@ -117,14 +115,10 @@ pub struct RevocationResult {
 
 // ── Funções auxiliares ─────────────────────────────────────
 
-/// Tenta extrair LgpdMetadata de um SharedEPA deserializando o state_json.
-/// Como o EPA não armazena LgpdMetadata diretamente, precisamos do manifest.
-/// Para simplificar, usamos o integrity_hash como proxy e buscamos o manifest original.
-/// Na prática, o índice é construído quando temos acesso ao manifest.
-fn extract_lgpd_from_epa(_epa: &SharedEPA) -> Option<crate::lgpd::LgpdMetadata> {
-    // O EPA em si não contém LgpdMetadata diretamente.
-    // O índice é populado externamente quando temos acesso ao manifest.
-    None
+/// Extrai LgpdMetadata do SharedEPA.
+/// Agora o EPA carrega o metadata diretamente no campo lgpd_metadata.
+fn extract_lgpd_from_epa(epa: &SharedEPA) -> Option<crate::lgpd::LgpdMetadata> {
+    epa.lgpd_metadata.clone()
 }
 
 fn parse_timestamp(ts: &str) -> DateTime<Utc> {
@@ -191,6 +185,7 @@ pub fn create_suppression_epa(node: &NodeIdentity, original_epa: &SharedEPA) -> 
         &evidence_jsonl,
         &decisions_jsonl,
         &manifest_json,
+        None,
     )
 }
 
@@ -286,6 +281,7 @@ mod tests {
             r#"{"evidence":"ok"}"#,
             r#"{"decision":"ok"}"#,
             r#"{"manifest":"v1"}"#,
+            None,
         );
         epa.encrypted_payload = Some(vec![1, 2, 3]);
         epa.ephemeral_public_key = Some(vec![4, 5, 6]);
@@ -309,6 +305,7 @@ mod tests {
             r#"{"evidence":"ok"}"#,
             r#"{"decision":"ok"}"#,
             r#"{"manifest":"v1"}"#,
+            None,
         );
 
         let suppression = create_suppression_epa(&node, &original);

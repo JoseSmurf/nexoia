@@ -1,4 +1,5 @@
 use crate::hash::canonical_hash;
+use crate::lgpd::LgpdMetadata;
 use crate::network::crypto::{self, KeyPair};
 use crate::network::identity::{verify_signature, NodeIdentity};
 use chrono::{DateTime, Utc};
@@ -12,6 +13,7 @@ const TIMESTAMP_MAX_FUTURE_SECS: i64 = 120;
 /// EPA compartilhável na rede P2P.
 /// Inclui assinatura Ed25519 real e timestamp para prevenir replay attacks.
 /// Suporta payload encriptado opcional para privacidade.
+/// Carrega LGPD metadata para indexação de direitos do titular.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharedEPA {
     pub epa_id: String,
@@ -30,6 +32,10 @@ pub struct SharedEPA {
     /// Presente apenas quando `encrypted_payload` é Some.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub ephemeral_public_key: Option<Vec<u8>>,
+    /// LGPD metadata para indexação de direitos do titular.
+    /// Presente quando o EPA foi criado com base legal LGPD.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub lgpd_metadata: Option<LgpdMetadata>,
 }
 
 /// Resultado da verificação de EPA.
@@ -62,12 +68,14 @@ impl std::error::Error for VerifyError {}
 
 impl SharedEPA {
     /// Cria EPA com assinatura Ed25519 (sem encriptação).
+    /// Se `lgpd_metadata` for Some, inclui no EPA para indexação de direitos do titular.
     pub fn create(
         node: &NodeIdentity,
         state_json: &str,
         evidence_jsonl: &str,
         decisions_jsonl: &str,
         manifest_json: &str,
+        lgpd_metadata: Option<LgpdMetadata>,
     ) -> Self {
         let state_hash = canonical_hash(state_json);
         let evidence_hash = canonical_hash(evidence_jsonl);
@@ -96,10 +104,12 @@ impl SharedEPA {
             integrity_hash,
             encrypted_payload: None,
             ephemeral_public_key: None,
+            lgpd_metadata,
         }
     }
 
     /// Cria EPA com payload encriptado para um destinatário específico.
+    /// Se `lgpd_metadata` for Some, inclui no EPA para indexação de direitos do titular.
     pub fn create_encrypted(
         node: &NodeIdentity,
         state_json: &str,
@@ -107,6 +117,7 @@ impl SharedEPA {
         decisions_jsonl: &str,
         manifest_json: &str,
         recipient_public_key: &[u8; 32],
+        lgpd_metadata: Option<LgpdMetadata>,
     ) -> Result<Self, String> {
         let mut epa = Self::create(
             node,
@@ -114,6 +125,7 @@ impl SharedEPA {
             evidence_jsonl,
             decisions_jsonl,
             manifest_json,
+            lgpd_metadata,
         );
 
         // Encripta o conteúdo sensível
@@ -252,7 +264,7 @@ mod tests {
         let node = NodeIdentity::generate("test_node");
         let (state, evidence, decision, manifest) = sample_data();
 
-        let epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest);
+        let epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest, None);
         assert!(epa.verify_full().is_ok());
     }
 
@@ -261,7 +273,7 @@ mod tests {
         let node = NodeIdentity::generate("test_node");
         let (state, evidence, decision, manifest) = sample_data();
 
-        let mut epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest);
+        let mut epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest, None);
         epa.state_hash = "tampered".to_string();
 
         assert_eq!(epa.verify_full(), Err(VerifyError::IntegrityFailed));
@@ -273,7 +285,7 @@ mod tests {
         let wrong_node = NodeIdentity::generate("wrong_node");
         let (state, evidence, decision, manifest) = sample_data();
 
-        let mut epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest);
+        let mut epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest, None);
         // Re-assina com chave errada
         epa.ed25519_signature = wrong_node.sign(&epa.integrity_hash);
 
@@ -285,7 +297,7 @@ mod tests {
         let node = NodeIdentity::generate("test_node");
         let (state, evidence, decision, manifest) = sample_data();
 
-        let mut epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest);
+        let mut epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest, None);
         // Timestamp de 10 minutos atrás
         epa.timestamp = (Utc::now() - chrono::Duration::minutes(10)).to_rfc3339();
 

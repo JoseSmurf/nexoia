@@ -46,6 +46,7 @@ pub async fn run_pipeline(
     epas: &Arc<RwLock<Vec<SharedEPA>>>,
     trusted_peers: &Arc<RwLock<TrustedPeerList>>,
     data_path: &Path,
+    lgpd_index: Option<Arc<RwLock<crate::lgpd_rights::LgpdIndex>>>,
 ) -> Result<(), Box<dyn Error>> {
     let limiter = crate::defense::RateLimiter::new(100, Duration::from_secs(60));
     let engine = crate::ai::MockEngine::new(0.70);
@@ -129,6 +130,7 @@ pub async fn run_pipeline(
         &evidence_jsonl,
         &decisions_jsonl,
         &manifest_json,
+        state.lgpd.clone(),
     );
 
     println!("\nEPA created: {}", epa);
@@ -143,6 +145,32 @@ pub async fn run_pipeline(
             );
         }
         epa_list.push(epa.clone());
+    }
+
+    // Insere EPA no índice LGPD se houver metadata
+    if let Some(ref index) = lgpd_index {
+        if let Some(ref lgpd) = epa.lgpd_metadata {
+            if let Some(ref subject_hash) = lgpd.data_subject_hash {
+                let epa_hash = canonical_hash(&epa.integrity_hash);
+                let entry = crate::lgpd_rights::EpaRef {
+                    epa_id: epa.epa_id.clone(),
+                    epa_hash,
+                    lawful_basis: lgpd.lawful_basis,
+                    purpose: lgpd.purpose.clone(),
+                    created_at: chrono::DateTime::parse_from_rfc3339(&epa.timestamp)
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                        .unwrap_or_else(|_| chrono::Utc::now()),
+                    expires_at: {
+                        let created = chrono::DateTime::parse_from_rfc3339(&epa.timestamp)
+                            .map(|dt| dt.with_timezone(&chrono::Utc))
+                            .unwrap_or_else(|_| chrono::Utc::now());
+                        created + chrono::Duration::days(lgpd.retention_days as i64)
+                    },
+                };
+                let mut idx = index.write().await;
+                idx.insert(subject_hash.clone(), entry);
+            }
+        }
     }
 
     persistence::save_network_state(data_path, peers, epas, trusted_peers).await;

@@ -57,7 +57,7 @@ mod tests {
         let decision = r#"{"decision":"ok"}"#;
         let manifest = r#"{"manifest":"v1"}"#;
 
-        let epa = SharedEPA::create(&node, state, evidence, decision, manifest);
+        let epa = SharedEPA::create(&node, state, evidence, decision, manifest, None);
         let result = verify_epa(&epa);
         assert!(matches!(result, VerifyResult::Valid));
     }
@@ -72,7 +72,7 @@ mod tests {
             r#"{"manifest":"v1"}"#.to_string(),
         );
 
-        let mut epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest);
+        let mut epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest, None);
         epa.state_hash = "tampered".to_string();
 
         let result = verify_epa(&epa);

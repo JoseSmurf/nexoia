@@ -1,0 +1,190 @@
+﻿
+      |                   ^ ...and 9 other patterns collectively make this unreachable
+      = note: `#[warn(unreachable_patterns)]` (part of `#[warn(unused)]`) on by default
+  System.Management.Automation.RemoteException
+  warning: `nexoia` (lib) generated 3 warnings (run `cargo fix --lib -p nexoia` to apply 2 suggestions)
+     Compiling nexoia v0.1.0 (C:\Users\smurf\nexoia)
+> error[E0432]: unresolved imports `crate::lgpd_rights`, `crate::lgpd_rights`
+   --> src\bin\..\network\api.rs:1:12
+    |
+  1 | use crate::lgpd_rights::{
+    |            ^^^^^^^^^^^
+    |            |
+    |     ^^^^ no `lgpd_rights` in the root
+    |
+    = help: consider importing this module instead:
+            nexoia::lgpd_rights
+  System.Management.Automation.RemoteException
+> error[E0433]: failed to resolve: unresolved import
+     --> src\bin\..\network\api.rs:421:38
+      |
+  421 |                 lawful_basis: crate::lgpd::LawfulBasis::ObrigacaoLegal,
+      |                                      ^^^^ unresolved import
+      |
+      |
+  421 -                 lawful_basis: crate::lgpd::LawfulBasis::ObrigacaoLegal,
+  421 +                 lawful_basis: LawfulBasis::ObrigacaoLegal,
+      |
+  System.Management.Automation.RemoteException
+> error[E0433]: failed to resolve: unresolved import
+     --> src\bin\..\network\api.rs:449:43
+      |
+  449 |         if epa_ref.lawful_basis == crate::lgpd::LawfulBasis::Consentimento {
+      |                                           ^^^^ unresolved import
+      |
+      |
+  449 -         if epa_ref.lawful_basis == crate::lgpd::LawfulBasis::Consentimento {
+  449 +         if epa_ref.lawful_basis == LawfulBasis::Consentimento {
+      |
+  System.Management.Automation.RemoteException
+> error[E0432]: unresolved imports `crate::lgpd_rights`, `crate::lgpd_rights`
+   --> src\network\api.rs:1:12
+    |
+  1 | use crate::lgpd_rights::{
+    |            ^^^^^^^^^^^
+    |            |
+    |     ^^^^ no `lgpd_rights` in the root
+    |
+    = help: consider importing this module instead:
+            nexoia::lgpd_rights
+  System.Management.Automation.RemoteException
+> error[E0433]: failed to resolve: unresolved import
+     --> src\main.rs:308:49
+      |
+  308 |         lgpd_index: Arc::new(RwLock::new(crate::lgpd_rights::LgpdIndex::new())),
+      |                                                 ^^^^^^^^^^^ unresolved import
+      |
+    --> src\nex\mod.rs:19:25
+     |
+  19 | pub use parser::{parse, ParseError};
+     |                         ^^^^^^^^^^
+  System.Management.Automation.RemoteException
+> error[E0282]: type annotations needed
+     --> src\bin\..\network\api.rs:352:9
+      |
+  352 |     let index = state.lgpd_index.read().await;
+      |         ^^^^^
+  353 |     let refs = index.lookup(&hash);
+  help: consider giving `index` an explicit type
+      |
+  352 |     let index: /* Type */ = state.lgpd_index.read().await;
+      |              ++++++++++++
+  System.Management.Automation.RemoteException
+> error[E0282]: type annotations needed
+     --> src\bin\..\network\api.rs:362:9
+      |
+  362 |     let index = state.lgpd_index.read().await;
+      |         ^^^^^
+  363 |     let refs: Vec<EpaRef> = index.lookup(&hash).into_iter().cloned().collect();
+  help: consider giving `index` an explicit type
+      |
+  362 |     let index: /* Type */ = state.lgpd_index.read().await;
+      |              ++++++++++++
+  System.Management.Automation.RemoteException
+> error[E0282]: type annotations needed
+     --> src\bin\..\network\api.rs:377:9
+      |
+  377 |     let index = state.lgpd_index.read().await;
+      |         ^^^^^
+  378 |     let refs: Vec<EpaRef> = index.lookup(&hash).into_iter().cloned().collect();
+  help: consider giving `index` an explicit type
+      |
+  377 |     let index: /* Type */ = state.lgpd_index.read().await;
+      |              ++++++++++++
+  System.Management.Automation.RemoteException
+> error[E0282]: type annotations needed
+     --> src\bin\..\network\api.rs:413:9
+      |
+  413 |     let mut index = state.lgpd_index.write().await;
+      |         ^^^^^^^^^
+  414 |     for r in &results {
+  help: consider giving `index` an explicit type
+      |
+  413 |     let mut index: /* Type */ = state.lgpd_index.write().await;
+      |                  ++++++++++++
+  System.Management.Automation.RemoteException
+> error[E0282]: type annotations needed
+     --> src\bin\..\network\api.rs:437:9
+      |
+  437 |     let index = state.lgpd_index.read().await;
+      |         ^^^^^
+  438 |     let refs: Vec<EpaRef> = index.lookup(&hash).into_iter().cloned().collect();
+  help: consider giving `index` an explicit type
+      |
+  437 |     let index: /* Type */ = state.lgpd_index.read().await;
+      |              ++++++++++++
+  System.Management.Automation.RemoteException
+> error[E0282]: type annotations needed
+     --> src\bin\..\network\api.rs:446:9
+      |
+  446 |     let mut index = state.lgpd_index.write().await;
+      |         ^^^^^^^^^
+  ...
+  help: consider giving `index` an explicit type
+      |
+  446 |     let mut index: /* Type */ = state.lgpd_index.write().await;
+      |                  ++++++++++++
+  System.Management.Automation.RemoteException
+> error[E0282]: type annotations needed
+     --> src\network\api.rs:352:9
+      |
+  352 |     let index = state.lgpd_index.read().await;
+      |         ^^^^^
+  353 |     let refs = index.lookup(&hash);
+  help: consider giving `index` an explicit type
+      |
+  352 |     let index: /* Type */ = state.lgpd_index.read().await;
+      |              ++++++++++++
+  System.Management.Automation.RemoteException
+> error[E0282]: type annotations needed
+     --> src\network\api.rs:362:9
+      |
+  362 |     let index = state.lgpd_index.read().await;
+      |         ^^^^^
+  363 |     let refs: Vec<EpaRef> = index.lookup(&hash).into_iter().cloned().collect();
+  help: consider giving `index` an explicit type
+      |
+  362 |     let index: /* Type */ = state.lgpd_index.read().await;
+      |              ++++++++++++
+  System.Management.Automation.RemoteException
+> error[E0282]: type annotations needed
+     --> src\network\api.rs:377:9
+      |
+  377 |     let index = state.lgpd_index.read().await;
+      |         ^^^^^
+  378 |     let refs: Vec<EpaRef> = index.lookup(&hash).into_iter().cloned().collect();
+  ...
+  745 |                   _ => {
+      |                   ^ ...and 9 other patterns collectively make this unreachable
+      = note: `#[warn(unreachable_patterns)]` (part of `#[warn(unused)]`) on by default
+  System.Management.Automation.RemoteException
+> error[E0282]: type annotations needed
+     --> src\network\api.rs:413:9
+      |
+  413 |     let mut index = state.lgpd_index.write().await;
+      |         ^^^^^^^^^
+  414 |     for r in &results {
+  help: consider giving `index` an explicit type
+      |
+  413 |     let mut index: /* Type */ = state.lgpd_index.write().await;
+      |                  ++++++++++++
+  System.Management.Automation.RemoteException
+> error[E0282]: type annotations needed
+     --> src\network\api.rs:437:9
+      |
+  437 |     let index = state.lgpd_index.read().await;
+      |         ^^^^^
+  438 |     let refs: Vec<EpaRef> = index.lookup(&hash).into_iter().cloned().collect();
+  help: consider giving `index` an explicit type
+      |
+  437 |     let index: /* Type */ = state.lgpd_index.read().await;
+      |              ++++++++++++
+  System.Management.Automation.RemoteException
+> error[E0282]: type annotations needed
+     --> src\network\api.rs:446:9
+      |
+  446 |     let mut index = state.lgpd_index.write().await;
+      |         ^^^^^^^^^
+  ...
+
+

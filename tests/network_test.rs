@@ -42,7 +42,7 @@ async fn epa_sharing_between_nodes() {
     let decision = r#"{"decision":"ok"}"#;
     let manifest = r#"{"manifest":"v1"}"#;
 
-    let epa = SharedEPA::create(&node_a, state, evidence, decision, manifest);
+    let epa = SharedEPA::create(&node_a, state, evidence, decision, manifest, None);
 
     let msg = NetworkMessage::EPA(epa.clone());
     transport_a.send(&msg, addr_b).await.unwrap();
@@ -92,7 +92,7 @@ fn epa_verification_works() {
     let decision = r#"{"decision":"ok"}"#;
     let manifest = r#"{"manifest":"v1"}"#;
 
-    let epa = SharedEPA::create(&node, state, evidence, decision, manifest);
+    let epa = SharedEPA::create(&node, state, evidence, decision, manifest, None);
 
     let result = verify_epa(&epa);
     assert!(matches!(result, VerifyResult::Valid));

@@ -22,9 +22,11 @@ Não é log. Não é auditoria. É **prova**. Qualquer pessoa verifica sem confi
 
 ## Estado Atual
 
-- 618 testes verdes
+- 624 testes verdes (incluindo LGPD Nível 2)
 - LGPD Nível 1 (metadata) + Nível 2 (direitos do titular) implementados
 - 4 endpoints LGPD: `GET /titular/:hash/dados`, `GET /titular/:hash/export`, `DELETE /titular/:hash`, `POST /titular/:hash/revogar`
+- Pipeline → LGPD Index conectado automaticamente
+- Índice LGPD reconstruído na inicialização do nó
 - Rede P2P com 15 módulos (handshake, heartbeat, reputação, sessão, transporte seguro)
 - Linguagem NEX (DSL para compliance) com parser, avaliador, motor reativo
 - Rate limiter sharded com 64 shards
@@ -57,12 +59,12 @@ NEXOIA_LGPD_BASIS=consentimento NEXOIA_LGPD_PURPOSE=processamento NEXOIA_LGPD_RE
 
 | Arquivo | Propósito | Linhas |
 |---------|-----------|--------|
-| `src/main.rs` | Entry point + pipeline + rede P2P | 318 |
+| `src/main.rs` | Entry point + pipeline + rede P2P | 356 |
 | `src/lib.rs` | Re-exports de todos os módulos | 13 |
-| `src/pipeline.rs` | Orquestração state→EPA + manifest LGPD | 195 |
+| `src/pipeline.rs` | Orquestração state→EPA + manifest LGPD | 245 |
 | `src/state.rs` | State de execução + LGPD metadata | 129 |
 | `src/lgpd.rs` | LawfulBasis, LgpdMetadata, validate() | 191 |
-| `src/lgpd_rights.rs` | EpaRef, LgpdIndex, anonimização, EPA de supressão | — |
+| `src/lgpd_rights.rs` | EpaRef, LgpdIndex, anonimização, EPA de supressão | 349 |
 | `src/defense.rs` | Validação + RateLimiter sharded 64 shards | 229 |
 | `src/decision.rs` | Classificação determinística OK/VIOLACAO/ABSTERSE | 230 |
 | `src/explain.rs` | Diagnóstico + conflitos + load_decisions_jsonl | 404 |
@@ -189,7 +191,30 @@ act id = action requires strength  # Registro de decisão
 1. Anonimiza dados **dentro** do EPA
 2. Gera **NOVO EPA de supressão** provando a anonimização
 
+### Fluxo LGPD Completo (Integração Automática)
+
+O fluxo LGPD é **totalmente automático** via pipeline:
+
+```
+env vars → State.lgpd → pipeline → SharedEPA(lgpd_metadata) → lgpd_index.insert() → persistência
+                                                          ↓
+                                              GET /titular/:hash/dados
+                                              DELETE /titular/:hash → anonimiza → EPA supressão
+```
+
+**NÃO insira manualmente no índice.** O pipeline faz isso automaticamente:
+1. Pipeline lê LGPD de env vars e coloca em `State.lgpd`
+2. `SharedEPA::create()` recebe `state.lgpd` e serializa no campo `lgpd_metadata`
+3. Após criar EPA, pipeline chama `lgpd_index.insert()` se houver `data_subject_hash`
+4. Na inicialização do nó, `LgpdIndex::build_from_epas()` reconstrói índice dos EPAs do disco
+5. Endpoints LGPD consultam o índice (não o EPA diretamente)
+
+**Campos relevantes no SharedEPA:**
+- `lgpd_metadata: Option<LgpdMetadata>` — metadata completo para indexação
+- `state_hash`, `evidence_hash` — zerados na anonimização (prova de remoção)
+
 ---
+
 
 ## Convenções
 

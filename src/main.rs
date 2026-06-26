@@ -260,6 +260,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         persistence::parse_peers(&persisted.peers),
         eff_max,
     )));
+
+    // Reconstrói índice LGPD a partir dos EPAs carregados do disco
+    let lgpd_index = Arc::new(RwLock::new(crate::lgpd_rights::LgpdIndex::new()));
+    {
+        let epas_guard = epas.read().await;
+        let mut idx = lgpd_index.write().await;
+        idx.build_from_epas(&epas_guard);
+        println!(
+            "LGPD Index:   Rebuilt from {} EPAs ({} subjects indexed)",
+            epas_guard.len(),
+            idx.subjects().len()
+        );
+    }
     let mut rep_store = ReputationStore::with_path(cfg.data_dir.join("reputation.json"));
     match rep_store.load() {
         Ok(()) => {
@@ -306,7 +319,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         epas: Arc::clone(&epas),
         peers: Arc::clone(&peers),
         transport: Arc::clone(&udp_socket),
-        lgpd_index: Arc::new(RwLock::new(crate::lgpd_rights::LgpdIndex::new())),
+        lgpd_index: Arc::clone(&lgpd_index),
         rate_limiter: Arc::new(crate::defense::RateLimiter::new(
             100,
             Duration::from_secs(60),
@@ -328,7 +341,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         api_state,
         api_addr,
     );
-    run_pipeline(&node, &peers, &epas, &trusted_peers, &data_path).await?;
+    run_pipeline(
+        &node,
+        &peers,
+        &epas,
+        &trusted_peers,
+        &data_path,
+        Some(lgpd_index),
+    )
+    .await?;
     println!("\nNode running. Press Ctrl+C to stop.");
     tokio::signal::ctrl_c().await?;
     Ok(())

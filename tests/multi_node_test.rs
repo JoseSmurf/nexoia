@@ -137,6 +137,7 @@ async fn test_epa_signature_is_ed25519() {
         r#"{"evidence":"data"}"#,
         r#"{"decision":"ok"}"#,
         r#"{"manifest":"v1"}"#,
+        None,
     );
 
     // Assert
@@ -159,6 +160,7 @@ async fn test_multiple_nodes_create_unique_epas() {
         r#"{"evidence":"a"}"#,
         r#"{"decision":"ok"}"#,
         r#"{"manifest":"v1"}"#,
+        None,
     );
 
     let epa_b = SharedEPA::create(
@@ -167,6 +169,7 @@ async fn test_multiple_nodes_create_unique_epas() {
         r#"{"evidence":"b"}"#,
         r#"{"decision":"ok"}"#,
         r#"{"manifest":"v1"}"#,
+        None,
     );
 
     let epa_c = SharedEPA::create(
@@ -175,6 +178,7 @@ async fn test_multiple_nodes_create_unique_epas() {
         r#"{"evidence":"c"}"#,
         r#"{"decision":"ok"}"#,
         r#"{"manifest":"v1"}"#,
+        None,
     );
 
     // Assert: Cada EPA tem assinatura e hash únicos

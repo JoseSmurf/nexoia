@@ -18,7 +18,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
 
 #[derive(Clone)]
@@ -239,6 +238,9 @@ async fn receive_encrypted_epa(
     let mut key_arr = [0u8; 32];
     key_arr.copy_from_slice(&recipient_key_bytes);
 
+    // Extract LGPD metadata from request if present (for index insertion)
+    let lgpd_metadata = None; // Could be extended to accept LGPD in request
+
     let epa = SharedEPA::create_encrypted(
         &state.node_identity,
         &req.state_json,
@@ -246,6 +248,7 @@ async fn receive_encrypted_epa(
         &req.decisions_jsonl,
         &req.manifest_json,
         &key_arr,
+        lgpd_metadata,
     )
     .map_err(|e| {
         (
@@ -427,7 +430,7 @@ mod tests {
             peers: Arc::new(RwLock::new(PeerList::new(10))),
             transport,
             lgpd_index: Arc::new(RwLock::new(LgpdIndex::new())),
-            rate_limiter: Arc::new(RateLimiter::new(100, Duration::from_secs(60))),
+            rate_limiter: Arc::new(RateLimiter::new(100, std::time::Duration::from_secs(60))),
         }
     }
 
@@ -469,7 +472,7 @@ mod tests {
 
     #[tokio::test]
     async fn rate_limiter_blocks_after_limit() {
-        let limiter = RateLimiter::new(2, Duration::from_secs(1));
+        let limiter = RateLimiter::new(2, std::time::Duration::from_secs(1));
 
         assert!(limiter.check("127.0.0.1"));
         assert!(limiter.check("127.0.0.1"));
@@ -478,7 +481,7 @@ mod tests {
 
     #[tokio::test]
     async fn rate_limiter_allows_different_ips() {
-        let limiter = RateLimiter::new(1, Duration::from_secs(1));
+        let limiter = RateLimiter::new(1, std::time::Duration::from_secs(1));
 
         assert!(limiter.check("127.0.0.1"));
         assert!(limiter.check("127.0.0.2"));
@@ -487,12 +490,12 @@ mod tests {
 
     #[tokio::test]
     async fn rate_limiter_resets_after_window() {
-        let limiter = RateLimiter::new(1, Duration::from_millis(100));
+        let limiter = RateLimiter::new(1, std::time::Duration::from_millis(100));
 
         assert!(limiter.check("127.0.0.1"));
         assert!(!limiter.check("127.0.0.1"));
 
-        std::thread::sleep(Duration::from_millis(150));
+        std::thread::sleep(std::time::Duration::from_millis(150));
 
         assert!(limiter.check("127.0.0.1"));
     }
@@ -649,6 +652,7 @@ mod tests {
             r#"{"evidence":"ok"}"#,
             r#"{"decision":"ok"}"#,
             r#"{"manifest":"v1"}"#,
+            None,
         );
         let epa_id = epa.epa_id.clone();
 
@@ -710,6 +714,7 @@ mod tests {
             r#"{"evidence":"ok"}"#,
             r#"{"decision":"ok"}"#,
             r#"{"manifest":"v1"}"#,
+            None,
         );
         let epa_id = epa.epa_id.clone();
 
@@ -756,6 +761,7 @@ mod tests {
             r#"{"evidence":"ok"}"#,
             r#"{"decision":"ok"}"#,
             r#"{"manifest":"v1"}"#,
+            None,
         );
 
         let app = Router::new()
@@ -790,6 +796,7 @@ mod tests {
             r#"{"evidence":"ok"}"#,
             r#"{"decision":"ok"}"#,
             r#"{"manifest":"v1"}"#,
+            None,
         );
         epa.state_hash = "tampered".to_string();
 
@@ -944,6 +951,7 @@ mod tests {
             r#"{"evidence":"ok"}"#,
             r#"{"decision":"ok"}"#,
             r#"{"manifest":"v1"}"#,
+            None,
         );
         epa.encrypted_payload = Some(vec![1, 2, 3]);
         epa.ephemeral_public_key = Some(vec![4, 5, 6]);

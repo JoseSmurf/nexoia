@@ -7,6 +7,7 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::Path;
+use zeroize::Zeroize;
 
 /// Identidade do nó na rede P2P.
 /// Usa Ed25519 para assinatura, X25519 para encriptação e ML-KEM-768 para proteção pós-quântica.
@@ -266,6 +267,14 @@ impl NodeIdentity {
     /// Retorna o VerifyingKey (chave pública Ed25519).
     pub fn verifying_key(&self) -> VerifyingKey {
         self.signing_key.verifying_key()
+    }
+}
+
+impl Drop for NodeIdentity {
+    fn drop(&mut self) {
+        // Zeroize the signing key bytes directly
+        // KeyPair and MlKemKeyPair handle their own fields via their Drop impls
+        self.signing_key.to_bytes().zeroize();
     }
 }
 

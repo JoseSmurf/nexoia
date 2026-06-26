@@ -5,6 +5,7 @@ pub mod evidence;
 pub mod explain;
 pub mod hash;
 pub mod lgpd;
+pub mod lgpd_rights;
 pub mod limits;
 pub mod network;
 pub mod nex;

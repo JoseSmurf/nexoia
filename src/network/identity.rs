@@ -395,6 +395,7 @@ impl fmt::Debug for NodeIdentity {
 }
 
 /// Verifica assinatura Ed25519 de dados.
+/// Rejeita chaves triviais/low-order (ex: [0u8; 32]) que causam falsos positivos.
 pub fn verify_signature(
     public_key_hex: &str,
     data: &[u8],
@@ -405,6 +406,11 @@ pub fn verify_signature(
         .try_into()
         .map_err(|_| "invalid public key length")?;
     let verifying_key = VerifyingKey::from_bytes(&key_array)?;
+
+    // Rejeita chaves triviais (ex: chave nula/all-zero que passa from_bytes mas é insegura)
+    if verifying_key.to_bytes() == [0u8; 32] {
+        return Err("public key is trivial (low-order)".into());
+    }
 
     let sig_array: [u8; 64] = signature_bytes
         .try_into()

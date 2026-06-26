@@ -180,11 +180,13 @@ impl SharedEPA {
     }
 
     /// Verifica assinatura Ed25519 completa.
+    /// Valida chave pública antes de verificar (rejeita chaves triviais).
     pub fn verify_signature(&self) -> Result<(), VerifyError> {
         if self.public_key.is_empty() {
             return Err(VerifyError::MissingPublicKey);
         }
 
+        // Validar chave pública antes de verificar (verify_signature já rejeita chaves triviais)
         let sig_valid = verify_signature(
             &self.public_key,
             self.integrity_hash.as_bytes(),
@@ -302,5 +304,17 @@ mod tests {
         epa.timestamp = (Utc::now() - chrono::Duration::minutes(10)).to_rfc3339();
 
         assert_eq!(epa.verify_full(), Err(VerifyError::TimestampExpired));
+    }
+
+    #[test]
+    fn trivial_public_key_rejected() {
+        let node = NodeIdentity::generate("test_node");
+        let (state, evidence, decision, manifest) = sample_data();
+
+        let mut epa = SharedEPA::create(&node, &state, &evidence, &decision, &manifest, None);
+        // Chave pública trivial (all-zero) - deve ser rejeitada
+        epa.public_key = "00".repeat(32);
+
+        assert_eq!(epa.verify_signature(), Err(VerifyError::SignatureFailed));
     }
 }

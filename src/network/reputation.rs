@@ -1,7 +1,7 @@
 use crate::limits::MAX_REPUTATION_ENTRIES;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Reputação de um nó na rede.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,22 +66,23 @@ impl NodeReputation {
 }
 
 /// Armazenamento de reputação persistente.
+/// Usa BTreeMap para serialização determinística (ordem das chaves fixa).
 pub struct ReputationStore {
-    reputations: HashMap<String, NodeReputation>,
+    reputations: BTreeMap<String, NodeReputation>,
     path: Option<std::path::PathBuf>,
 }
 
 impl ReputationStore {
     pub fn new() -> Self {
         Self {
-            reputations: HashMap::new(),
+            reputations: BTreeMap::new(),
             path: None,
         }
     }
 
     pub fn with_path(path: std::path::PathBuf) -> Self {
         Self {
-            reputations: HashMap::new(),
+            reputations: BTreeMap::new(),
             path: Some(path),
         }
     }
@@ -152,7 +153,7 @@ impl ReputationStore {
     }
 
     /// Retorna todas as reputações.
-    pub fn all(&self) -> &HashMap<String, NodeReputation> {
+    pub fn all(&self) -> &BTreeMap<String, NodeReputation> {
         &self.reputations
     }
 

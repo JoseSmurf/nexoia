@@ -1,7 +1,7 @@
 use crate::network::epa::SharedEPA;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 
@@ -154,15 +154,16 @@ pub struct TrustedPeer {
 }
 
 /// Lista de peers autenticados.
+/// Usa BTreeMap para serialização determinística (ordem das chaves fixa).
 pub struct TrustedPeerList {
-    peers: HashMap<SocketAddr, TrustedPeer>,
+    peers: BTreeMap<SocketAddr, TrustedPeer>,
     max_peers: usize,
 }
 
 impl TrustedPeerList {
     pub fn new(max_peers: usize) -> Self {
         Self {
-            peers: HashMap::new(),
+            peers: BTreeMap::new(),
             max_peers,
         }
     }

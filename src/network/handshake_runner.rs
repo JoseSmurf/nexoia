@@ -512,7 +512,7 @@ pub async fn run_udp_listener(
                                 serde_json::from_slice(&payload);
 
                             match inner_msg {
-                                Ok(inner) => {
+                                Ok(_inner) => {
                                     // Processa mensagem interna
                                     // (aqui você processaria EPA, Heartbeat, etc.)
                                     println!(
@@ -561,7 +561,10 @@ pub async fn run_udp_listener(
                 }
 
                 // Heartbeat: Peer está vivo
-                NetworkMessage::Heartbeat { node_id, timestamp } => {
+                NetworkMessage::Heartbeat {
+                    node_id: _node_id,
+                    timestamp: _timestamp,
+                } => {
                     // Verifica se tem sessão (lock order: sessions first)
                     if !session_manager.contains(&addr).await {
                         eprintln!("  ✗ Heartbeat from unauthenticated peer {}", addr);
@@ -617,7 +620,7 @@ pub async fn run_udp_listener(
                 }
 
                 // Heartbeat Ack: Peer confirmou que está vivo
-                NetworkMessage::HeartbeatAck { node_id } => {
+                NetworkMessage::HeartbeatAck { node_id: _node_id } => {
                     let mut states = peer_states.write().await;
                     if let Some(state) = states.get_mut(&addr) {
                         state.record_heartbeat();
@@ -692,7 +695,7 @@ pub async fn run_udp_listener(
                 }
 
                 // EPA: Só aceita de peers autenticados
-                NetworkMessage::EPA(mut epa) => {
+                NetworkMessage::EPA(epa) => {
                     let trusted = trusted_peers.read().await;
                     if !trusted.contains(&addr) {
                         eprintln!("✗ EPA rejected: {} not in trusted peers", addr);

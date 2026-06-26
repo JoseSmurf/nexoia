@@ -4,7 +4,6 @@
 
 use crate::network::reputation::ReputationStore;
 use crate::network::transport::PeerState;
-use crate::nex::layers::NexLayer;
 use crate::nex::reactive::ExecutableAction;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -98,6 +97,7 @@ impl ActionExecutor {
 mod tests {
     use super::*;
     use crate::nex::ast::Trigger;
+    use crate::nex::layers::NexLayer;
     use crate::nex::reactive::{NetworkEvent, ReactiveEngine, ReactiveRule};
 
     #[test]

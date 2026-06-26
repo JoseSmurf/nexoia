@@ -7,7 +7,6 @@ use crate::network::persistence::PersistedData;
 use crate::nex::reactive::ReactiveRule;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
 /// Checkpoint do estado do nó.
 #[derive(Debug, Clone, Serialize, Deserialize)]

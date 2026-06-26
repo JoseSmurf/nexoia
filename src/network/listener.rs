@@ -2,7 +2,6 @@
 // Lock order: see GLOBAL LOCK ORDER in src/main.rs
 
 use crate::network::identity::NodeIdentity;
-use crate::network::transport::UdpTransport;
 use crate::network::transport::{NetworkMessage, PeerList};
 use std::net::SocketAddr;
 use std::sync::Arc;

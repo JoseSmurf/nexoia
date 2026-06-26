@@ -1,6 +1,4 @@
-use crate::nex::ast::{
-    Action, Comparator, Condition, Expr, LogicalOp, Program, ReactiveAction, Stmt, Trigger, Type,
-};
+use crate::nex::ast::{Action, Comparator, Condition, Expr, LogicalOp, Program, Stmt, Type};
 use crate::provenance::typed_node::Marker;
 use crate::provenance::{
     Anchored, InsufficientWitnessesError, Local, Signed, TypedNode, Unverifiable, Witness,

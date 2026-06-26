@@ -297,7 +297,7 @@ impl<'de> Deserialize<'de> for NodeIdentity {
         let saved = SavedIdentity::deserialize(deserializer)?;
 
         // Descriptografa ou usa texto puro
-        let signing_key = if let Some(encrypted) = &saved.encrypted_secret_key {
+        let signing_key = if let Some(_encrypted) = &saved.encrypted_secret_key {
             // Não podemos descriptografar sem passphrase no contexto de deserialização
             // Retorna erro indicando que passphrase é necessária
             return Err(serde::de::Error::custom(
@@ -312,7 +312,7 @@ impl<'de> Deserialize<'de> for NodeIdentity {
         };
 
         // Carrega par de chaves X25519
-        let encryption_keypair = if let Some(encrypted) = &saved.encrypted_encryption_key {
+        let encryption_keypair = if let Some(_encrypted) = &saved.encrypted_encryption_key {
             return Err(serde::de::Error::custom(
                 "Encrypted identity requires passphrase. Use load_or_create() instead.",
             ));

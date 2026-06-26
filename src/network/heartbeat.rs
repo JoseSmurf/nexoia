@@ -1,11 +1,10 @@
 // heartbeat.rs — Heartbeat sender and monitor
 // Lock order: see GLOBAL LOCK ORDER in src/main.rs
 
-use crate::limits::MAX_PEER_STATES;
 use crate::network::identity::NodeIdentity;
 use crate::network::reputation::ReputationStore;
 use crate::network::session::SessionManager;
-use crate::network::transport::{NetworkMessage, PeerList, PeerState, TrustedPeerList};
+use crate::network::transport::{NetworkMessage, PeerState, TrustedPeerList};
 use crate::nex::action_executor::ActionExecutor;
 use crate::nex::reactive::{NetworkEvent, ReactiveEngine};
 use std::collections::HashMap;
@@ -20,7 +19,7 @@ pub async fn run_heartbeat_sender(
     node: NodeIdentity,
     trusted_peers: Arc<RwLock<TrustedPeerList>>,
     peer_states: Arc<RwLock<HashMap<SocketAddr, PeerState>>>,
-    udp_addr: SocketAddr,
+    _udp_addr: SocketAddr,
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(30));
     let mut peer_exchange_counter = 0u32;
@@ -100,7 +99,7 @@ pub async fn run_heartbeat_monitor(
     peer_states: Arc<RwLock<HashMap<SocketAddr, PeerState>>>,
     trusted_peers: Arc<RwLock<TrustedPeerList>>,
     reputation: Arc<RwLock<ReputationStore>>,
-    mut reactive_engine: ReactiveEngine,
+    reactive_engine: ReactiveEngine,
     session_manager: Arc<SessionManager>,
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(60));

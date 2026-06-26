@@ -22,7 +22,7 @@
 //! Cada camada só pode usar funcionalidades das camadas inferiores.
 //! Camadas superiores NÃO podem acessar internals das inferiores.
 
-use crate::nex::ast::{ReactiveAction, Stmt, Trigger};
+use crate::nex::ast::Stmt;
 
 /// Nível de complexidade da linguagem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -113,7 +113,9 @@ use std::fmt;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nex::ast::{Action, Comparator, Condition, Expr, LogicalOp};
+    use crate::nex::ast::{
+        Action, Comparator, Condition, Expr, LogicalOp, ReactiveAction, Trigger,
+    };
 
     #[test]
     fn basic_layer_only() {

@@ -251,12 +251,6 @@ impl UdpTransport {
         Ok(())
     }
 
-    /// Envia bytes brutos (para mensagens já frameadas).
-    pub async fn send_raw(&self, data: &[u8], target: SocketAddr) -> Result<(), std::io::Error> {
-        self.socket.send_to(data, target).await?;
-        Ok(())
-    }
-
     pub async fn broadcast(
         &self,
         msg: &NetworkMessage,

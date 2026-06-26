@@ -24,7 +24,12 @@ pub async fn run_discovery(
                 address: format!("127.0.0.1:{}", udp_port),
             };
             if let Ok(data) = serde_json::to_vec(&msg) {
-                let _ = socket.send_to(&data, broadcast_addr).await;
+                // Length-prefix framing (4 bytes big-endian)
+                let len = data.len() as u32;
+                let mut framed = Vec::with_capacity(4 + data.len());
+                framed.extend_from_slice(&len.to_be_bytes());
+                framed.extend_from_slice(&data);
+                let _ = socket.send_to(&framed, broadcast_addr).await;
             }
             tokio::time::sleep(Duration::from_secs(5)).await;
         }

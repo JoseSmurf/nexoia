@@ -1,3 +1,4 @@
+use crate::lgpd::LgpdMetadata;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -45,6 +46,8 @@ pub struct State {
     pub subject: String,
     pub threshold: i64,
     pub input_value: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lgpd: Option<LgpdMetadata>,
 }
 
 impl State {
@@ -66,6 +69,7 @@ impl State {
             subject,
             threshold,
             input_value,
+            lgpd: None,
         })
     }
 }

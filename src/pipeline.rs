@@ -3,6 +3,7 @@
 
 use crate::decision::{DecisionRecord, DecisionStatus};
 use crate::hash::canonical_hash;
+use crate::lgpd::{parse_lgpd_basis, LgpdMetadata};
 use crate::limits::MAX_EPA_ENTRIES;
 use crate::network::epa::SharedEPA;
 use crate::network::identity::NodeIdentity;
@@ -33,6 +34,10 @@ pub struct Manifest {
     pub reason_code: String,
     pub message: String,
     artifacts: Vec<ArtifactSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lgpd: Option<LgpdMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lgpd_hash: Option<String>,
 }
 
 pub async fn run_pipeline(
@@ -45,7 +50,31 @@ pub async fn run_pipeline(
     let limiter = crate::defense::RateLimiter::new(100, Duration::from_secs(60));
     let engine = crate::ai::MockEngine::new(0.70);
 
-    let state = State::from_env()?;
+    let mut state = State::from_env()?;
+
+    if let Ok(basis_raw) = std::env::var("NEXOIA_LGPD_BASIS") {
+        let purpose = std::env::var("NEXOIA_LGPD_PURPOSE")
+            .map_err(|_| "NEXOIA_LGPD_PURPOSE required when NEXOIA_LGPD_BASIS is set")?;
+        let retention: u32 = std::env::var("NEXOIA_LGPD_RETENTION_DAYS")
+            .map_err(|_| "NEXOIA_LGPD_RETENTION_DAYS required when NEXOIA_LGPD_BASIS is set")?
+            .parse()
+            .map_err(|e| format!("invalid NEXOIA_LGPD_RETENTION_DAYS: {e}"))?;
+        let data_subject_hash = std::env::var("NEXOIA_LGPD_DATA_SUBJECT_HASH").ok();
+        let dpia_ref = std::env::var("NEXOIA_LGPD_DPIA_REF").ok();
+        let consent_id = std::env::var("NEXOIA_LGPD_CONSENT_ID").ok();
+        let lawful_basis = parse_lgpd_basis(&basis_raw)?;
+        let lgpd = LgpdMetadata {
+            lawful_basis,
+            purpose,
+            retention_days: retention,
+            data_subject_hash,
+            dpia_ref,
+            consent_id,
+        };
+        lgpd.validate()?;
+        state.lgpd = Some(lgpd);
+    }
+
     let state_json = serde_json::to_string_pretty(&state)?;
 
     crate::defense::validate_raw_input(&state_json, 1_048_576)?;
@@ -135,6 +164,14 @@ pub fn build_manifest(
     evidence_jsonl: &str,
     decisions_jsonl: &str,
 ) -> Manifest {
+    let (lgpd, lgpd_hash) = match &state.lgpd {
+        Some(meta) => {
+            let json = serde_json::to_string(meta).expect("lgpd metadata serializes");
+            (Some(meta.clone()), Some(canonical_hash(&json)))
+        }
+        None => (None, None),
+    };
+
     Manifest {
         project: state.project.clone(),
         run_id: state.run_id,
@@ -159,6 +196,8 @@ pub fn build_manifest(
                 bytes: decisions_jsonl.len(),
             },
         ],
+        lgpd,
+        lgpd_hash,
     }
 }
 

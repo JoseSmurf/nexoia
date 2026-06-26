@@ -103,6 +103,7 @@ mod tests {
             subject: "subject".to_string(),
             threshold: 50,
             input_value: Some(60),
+            lgpd: None,
         }
     }
 

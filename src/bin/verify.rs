@@ -6,6 +6,8 @@ mod decision;
 mod evidence;
 #[path = "../hash.rs"]
 mod hash;
+#[path = "../lgpd.rs"]
+mod lgpd;
 #[path = "../provenance/mod.rs"]
 mod provenance;
 #[path = "../quality.rs"]

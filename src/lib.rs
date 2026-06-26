@@ -4,6 +4,7 @@ pub mod defense;
 pub mod evidence;
 pub mod explain;
 pub mod hash;
+pub mod lgpd;
 pub mod limits;
 pub mod network;
 pub mod nex;

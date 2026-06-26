@@ -7,6 +7,7 @@ mod defense;
 mod evidence;
 mod explain;
 mod hash;
+mod lgpd;
 mod limits;
 mod network;
 mod nex;

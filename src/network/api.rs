@@ -1,3 +1,6 @@
+use crate::lgpd_rights::{
+    self, AnonymizationResult, EpaRef, LgpdIndex, RevocationResult, TitularExport,
+};
 use crate::limits::MAX_EPA_ENTRIES;
 use crate::network::epa::SharedEPA;
 use crate::network::identity::NodeIdentity;
@@ -8,7 +11,7 @@ use axum::{
     http::StatusCode,
     middleware::{self, Next},
     response::Response,
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
@@ -83,6 +86,7 @@ pub struct ApiState {
     pub epas: Arc<RwLock<Vec<SharedEPA>>>,
     pub peers: Arc<RwLock<PeerList>>,
     pub transport: Arc<UdpTransport>,
+    pub lgpd_index: Arc<RwLock<LgpdIndex>>,
     pub rate_limiter: RateLimiter,
 }
 
@@ -174,6 +178,10 @@ pub async fn create_api(state: ApiState, addr: SocketAddr) -> Result<(), std::io
         .route("/epa/list", get(list_epas))
         .route("/epa/:id/verify", post(verify_epa_endpoint))
         .route("/epa/:id/verify-quick", get(verify_quick_endpoint))
+        .route("/titular/:hash/dados", get(titular_dados))
+        .route("/titular/:hash/export", get(titular_export))
+        .route("/titular/:hash", delete(titular_anonymize))
+        .route("/titular/:hash/revogar", post(titular_revoke))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             rate_limit_middleware,
@@ -334,6 +342,124 @@ async fn verify_quick_endpoint(
     }))
 }
 
+// ── LGPD Nível 2: Direitos do Titular ─────────────────────
+
+/// GET /titular/:hash/dados — lista todos os EPAs de um titular.
+async fn titular_dados(
+    State(state): State<ApiState>,
+    axum::extract::Path(hash): axum::extract::Path<String>,
+) -> Result<Json<Vec<EpaRef>>, StatusCode> {
+    let index = state.lgpd_index.read().await;
+    let refs = index.lookup(&hash);
+    Ok(Json(refs.into_iter().cloned().collect()))
+}
+
+/// GET /titular/:hash/export — portabilidade JSON.
+async fn titular_export(
+    State(state): State<ApiState>,
+    axum::extract::Path(hash): axum::extract::Path<String>,
+) -> Result<Json<TitularExport>, StatusCode> {
+    let index = state.lgpd_index.read().await;
+    let refs: Vec<EpaRef> = index.lookup(&hash).into_iter().cloned().collect();
+
+    Ok(Json(TitularExport {
+        data_subject_hash: hash,
+        epas: refs,
+        exported_at: chrono::Utc::now(),
+    }))
+}
+
+/// DELETE /titular/:hash — anonimiza dados pessoais + gera EPA de supressão.
+async fn titular_anonymize(
+    State(state): State<ApiState>,
+    axum::extract::Path(hash): axum::extract::Path<String>,
+) -> Result<Json<Vec<AnonymizationResult>>, StatusCode> {
+    let index = state.lgpd_index.read().await;
+    let refs: Vec<EpaRef> = index.lookup(&hash).into_iter().cloned().collect();
+    drop(index);
+
+    if refs.is_empty() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let mut results = Vec::new();
+    let mut epas = state.epas.write().await;
+
+    for epa_ref in &refs {
+        if let Some(epa) = epas.iter_mut().find(|e| e.epa_id == epa_ref.epa_id) {
+            let fields = lgpd_rights::anonymize_epa_fields(epa);
+
+            let suppression = lgpd_rights::create_suppression_epa(&state.node_identity, epa);
+
+            let result = AnonymizationResult {
+                original_epa_id: epa_ref.epa_id.clone(),
+                suppression_epa_id: suppression.epa_id.clone(),
+                fields_anonymized: fields,
+                timestamp: chrono::Utc::now(),
+            };
+
+            if epas.len() >= MAX_EPA_ENTRIES {
+                epas.remove(0);
+            }
+            epas.push(suppression.clone());
+            broadcast_epa(&state, &suppression).await;
+
+            results.push(result);
+        }
+    }
+    drop(epas);
+
+    // Atualiza índice
+    let mut index = state.lgpd_index.write().await;
+    for r in &results {
+        index.remove_epa(&hash, &r.original_epa_id);
+        index.insert(
+            hash.clone(),
+            EpaRef {
+                epa_id: r.suppression_epa_id.clone(),
+                epa_hash: crate::hash::canonical_hash(&r.suppression_epa_id),
+                lawful_basis: crate::lgpd::LawfulBasis::ObrigacaoLegal,
+                purpose: "lgpd_suppression".to_string(),
+                created_at: r.timestamp,
+                expires_at: r.timestamp + chrono::Duration::days(365 * 10),
+            },
+        );
+    }
+
+    Ok(Json(results))
+}
+
+/// POST /titular/:hash/revogar — revoga consentimento.
+async fn titular_revoke(
+    State(state): State<ApiState>,
+    axum::extract::Path(hash): axum::extract::Path<String>,
+) -> Result<Json<Vec<RevocationResult>>, StatusCode> {
+    let index = state.lgpd_index.read().await;
+    let refs: Vec<EpaRef> = index.lookup(&hash).into_iter().cloned().collect();
+    drop(index);
+
+    if refs.is_empty() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let mut results = Vec::new();
+    let mut index = state.lgpd_index.write().await;
+
+    for epa_ref in &refs {
+        if epa_ref.lawful_basis == crate::lgpd::LawfulBasis::Consentimento {
+            let result = RevocationResult {
+                epa_id: epa_ref.epa_id.clone(),
+                revoked_at: chrono::Utc::now(),
+                lawful_basis_before: epa_ref.lawful_basis,
+            };
+            index.remove_epa(&hash, &epa_ref.epa_id);
+            results.push(result);
+        }
+    }
+
+    Ok(Json(results))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,6 +482,7 @@ mod tests {
             epas: Arc::new(RwLock::new(Vec::new())),
             peers: Arc::new(RwLock::new(PeerList::new(10))),
             transport,
+            lgpd_index: Arc::new(RwLock::new(LgpdIndex::new())),
             rate_limiter: RateLimiter::new(100, Duration::from_secs(60)),
         }
     }
@@ -369,6 +496,10 @@ mod tests {
             .route("/epa/list", get(list_epas))
             .route("/epa/:id/verify", post(verify_epa_endpoint))
             .route("/epa/:id/verify-quick", get(verify_quick_endpoint))
+            .route("/titular/:hash/dados", get(titular_dados))
+            .route("/titular/:hash/export", get(titular_export))
+            .route("/titular/:hash", delete(titular_anonymize))
+            .route("/titular/:hash/revogar", post(titular_revoke))
             .with_state(state)
     }
 
@@ -741,5 +872,292 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         assert_eq!(state.epas.read().await.len(), 0);
+    }
+
+    // ── LGPD endpoints ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn titular_dados_empty() {
+        let state = test_state().await;
+        let app = test_app(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/titular/abc123/dados")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let refs: Vec<EpaRef> = serde_json::from_slice(&body).unwrap();
+        assert!(refs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn titular_dados_with_indexed_epa() {
+        let state = test_state().await;
+        let entry = EpaRef {
+            epa_id: "epa1".to_string(),
+            epa_hash: "hash1".to_string(),
+            lawful_basis: crate::lgpd::LawfulBasis::Consentimento,
+            purpose: "test".to_string(),
+            created_at: chrono::Utc::now(),
+            expires_at: chrono::Utc::now(),
+        };
+        state
+            .lgpd_index
+            .write()
+            .await
+            .insert("subject_hash".to_string(), entry);
+
+        let app = test_app(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/titular/subject_hash/dados")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let refs: Vec<EpaRef> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].epa_id, "epa1");
+    }
+
+    #[tokio::test]
+    async fn titular_export_returns_portability() {
+        let state = test_state().await;
+        let entry = EpaRef {
+            epa_id: "epa2".to_string(),
+            epa_hash: "hash2".to_string(),
+            lawful_basis: crate::lgpd::LawfulBasis::Contrato,
+            purpose: "export_test".to_string(),
+            created_at: chrono::Utc::now(),
+            expires_at: chrono::Utc::now(),
+        };
+        state
+            .lgpd_index
+            .write()
+            .await
+            .insert("subj2".to_string(), entry);
+
+        let app = test_app(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/titular/subj2/export")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let export: TitularExport = serde_json::from_slice(&body).unwrap();
+        assert_eq!(export.data_subject_hash, "subj2");
+        assert_eq!(export.epas.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn titular_anonymize_not_found() {
+        let state = test_state().await;
+        let app = test_app(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/titular/nonexistent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn titular_anonymize_with_epa() {
+        let state = test_state().await;
+        let node = state.node_identity.clone();
+
+        // Create and store a real EPA
+        let mut epa = SharedEPA::create(
+            &node,
+            r#"{"name":"João"}"#,
+            r#"{"evidence":"ok"}"#,
+            r#"{"decision":"ok"}"#,
+            r#"{"manifest":"v1"}"#,
+        );
+        epa.encrypted_payload = Some(vec![1, 2, 3]);
+        epa.ephemeral_public_key = Some(vec![4, 5, 6]);
+        let epa_id = epa.epa_id.clone();
+        state.epas.write().await.push(epa);
+
+        // Index it under a data subject
+        let entry = EpaRef {
+            epa_id: epa_id.clone(),
+            epa_hash: "hash".to_string(),
+            lawful_basis: crate::lgpd::LawfulBasis::Consentimento,
+            purpose: "test".to_string(),
+            created_at: chrono::Utc::now(),
+            expires_at: chrono::Utc::now(),
+        };
+        state
+            .lgpd_index
+            .write()
+            .await
+            .insert("subject1".to_string(), entry);
+
+        let app = test_app(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/titular/subject1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let results: Vec<AnonymizationResult> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].original_epa_id, epa_id);
+        assert!(!results[0].fields_anonymized.is_empty());
+
+        // Original EPA should be anonymized
+        let epas = state.epas.read().await;
+        let original = epas.iter().find(|e| e.epa_id == epa_id).unwrap();
+        assert!(original.encrypted_payload.is_none());
+        assert!(original.ephemeral_public_key.is_none());
+
+        // Suppression EPA should exist
+        assert!(epas
+            .iter()
+            .any(|e| e.epa_id == results[0].suppression_epa_id));
+    }
+
+    #[tokio::test]
+    async fn titular_revoke_not_found() {
+        let state = test_state().await;
+        let app = test_app(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/titular/nonexistent/revogar")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn titular_revoke_consentimento() {
+        let state = test_state().await;
+
+        let entry = EpaRef {
+            epa_id: "epa_consent".to_string(),
+            epa_hash: "hash".to_string(),
+            lawful_basis: crate::lgpd::LawfulBasis::Consentimento,
+            purpose: "test".to_string(),
+            created_at: chrono::Utc::now(),
+            expires_at: chrono::Utc::now(),
+        };
+        state
+            .lgpd_index
+            .write()
+            .await
+            .insert("subject3".to_string(), entry);
+
+        let app = test_app(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/titular/subject3/revogar")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let results: Vec<RevocationResult> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].epa_id, "epa_consent");
+
+        // Should be removed from index
+        let index = state.lgpd_index.read().await;
+        assert!(index.lookup("subject3").is_empty());
+    }
+
+    #[tokio::test]
+    async fn titular_revoke_non_consentimento_not_revoked() {
+        let state = test_state().await;
+
+        let entry = EpaRef {
+            epa_id: "epa_contract".to_string(),
+            epa_hash: "hash".to_string(),
+            lawful_basis: crate::lgpd::LawfulBasis::Contrato,
+            purpose: "test".to_string(),
+            created_at: chrono::Utc::now(),
+            expires_at: chrono::Utc::now(),
+        };
+        state
+            .lgpd_index
+            .write()
+            .await
+            .insert("subject4".to_string(), entry);
+
+        let app = test_app(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/titular/subject4/revogar")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let results: Vec<RevocationResult> = serde_json::from_slice(&body).unwrap();
+        assert!(results.is_empty()); // Contrato cannot be revoked
+
+        let index = state.lgpd_index.read().await;
+        assert_eq!(index.lookup("subject4").len(), 1);
     }
 }

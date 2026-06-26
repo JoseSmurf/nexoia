@@ -2,6 +2,10 @@
 
 #[path = "../hash.rs"]
 mod hash;
+#[path = "../lgpd.rs"]
+mod lgpd;
+#[path = "../lgpd_rights.rs"]
+mod lgpd_rights;
 #[path = "../limits.rs"]
 mod limits;
 #[path = "../network/mod.rs"]

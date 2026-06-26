@@ -8,6 +8,7 @@ mod evidence;
 mod explain;
 mod hash;
 mod lgpd;
+mod lgpd_rights;
 mod limits;
 mod network;
 mod nex;
@@ -305,6 +306,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         epas: Arc::clone(&epas),
         peers: Arc::clone(&peers),
         transport: Arc::clone(&udp_socket),
+        lgpd_index: Arc::new(RwLock::new(crate::lgpd_rights::LgpdIndex::new())),
         rate_limiter: api::RateLimiter::new(100, Duration::from_secs(60)),
     };
     spawn_tasks(

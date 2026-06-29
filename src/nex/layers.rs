@@ -109,9 +109,7 @@ use std::fmt;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nex::ast::{
-        Action, Comparator, Condition, Expr, ReactiveAction, Trigger,
-    };
+    use crate::nex::ast::{Action, Comparator, Condition, Expr, ReactiveAction, Trigger};
 
     #[test]
     fn basic_layer_only() {

@@ -366,7 +366,7 @@ fn lex_line(arena: &Arena, line: &str, line_no: usize) -> Result<Vec<Token>, Par
             }
         };
 
-tokens.push(token);
+        tokens.push(token);
     }
 
     Ok(tokens)

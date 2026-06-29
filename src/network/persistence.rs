@@ -20,8 +20,6 @@ pub struct PersistedTrustedPeer {
     pub addr: String,
 }
 
-
-
 pub fn load_data(path: &Path) -> Result<PersistedData, std::io::Error> {
     if !path.exists() {
         return Ok(PersistedData::default());

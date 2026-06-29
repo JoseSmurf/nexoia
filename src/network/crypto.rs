@@ -205,6 +205,7 @@ mod tests {
         assert_eq!(shared_alice, shared_bob);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn ml_kem_keypair_generate_and_encapsulate() {
         let keypair = MlKemKeyPair::generate();

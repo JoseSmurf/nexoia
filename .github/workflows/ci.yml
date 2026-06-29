@@ -54,7 +54,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run Miri
-        run: cargo miri test --lib
+        run: cargo miri test --lib -- --skip network:: --skip nex::
         env:
           MIRIFLAGS: -Zmiri-disable-isolation
 

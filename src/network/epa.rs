@@ -261,6 +261,7 @@ mod tests {
         )
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn create_and_verify_full() {
         let node = NodeIdentity::generate("test_node");
@@ -270,6 +271,7 @@ mod tests {
         assert!(epa.verify_full().is_ok());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn tampered_epa_fails_integrity() {
         let node = NodeIdentity::generate("test_node");
@@ -281,6 +283,7 @@ mod tests {
         assert_eq!(epa.verify_full(), Err(VerifyError::IntegrityFailed));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn wrong_signature_fails() {
         let node = NodeIdentity::generate("test_node");
@@ -294,6 +297,7 @@ mod tests {
         assert_eq!(epa.verify_full(), Err(VerifyError::SignatureFailed));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn expired_timestamp_fails() {
         let node = NodeIdentity::generate("test_node");
@@ -306,6 +310,7 @@ mod tests {
         assert_eq!(epa.verify_full(), Err(VerifyError::TimestampExpired));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn trivial_public_key_rejected() {
         let node = NodeIdentity::generate("test_node");

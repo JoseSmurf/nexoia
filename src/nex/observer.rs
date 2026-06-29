@@ -106,9 +106,18 @@ impl NexObserver {
         // ── 5. Reputação dos peers ───────────────────────────────
         self.check_reputation_health(&mut findings).await;
 
-        let ok = findings.iter().filter(|f| f.severity == Severity::Ok).count();
-        let warnings = findings.iter().filter(|f| f.severity == Severity::Warning).count();
-        let critical = findings.iter().filter(|f| f.severity == Severity::Critical).count();
+        let ok = findings
+            .iter()
+            .filter(|f| f.severity == Severity::Ok)
+            .count();
+        let warnings = findings
+            .iter()
+            .filter(|f| f.severity == Severity::Warning)
+            .count();
+        let critical = findings
+            .iter()
+            .filter(|f| f.severity == Severity::Critical)
+            .count();
 
         let overall = if critical > 0 {
             Severity::Critical
@@ -186,10 +195,7 @@ impl NexObserver {
         let epas = self.epas.read().await;
         let idx = self.lgpd_index.read().await;
 
-        let epas_with_lgpd: usize = epas
-            .iter()
-            .filter(|e| e.lgpd_metadata.is_some())
-            .count();
+        let epas_with_lgpd: usize = epas.iter().filter(|e| e.lgpd_metadata.is_some()).count();
         let indexed = idx.count();
 
         if epas_with_lgpd != indexed {
@@ -239,11 +245,10 @@ impl NexObserver {
         let nodes = self.provenance_nodes.read().await;
         let deriv = self.derivation_index.read().await;
 
-        let blinded = nodes.iter().filter(|n| {
-            n.parent_ref
-                .as_ref()
-                .map_or(false, |p| p.is_blinded())
-        }).count();
+        let blinded = nodes
+            .iter()
+            .filter(|n| n.parent_ref.as_ref().map_or(false, |p| p.is_blinded()))
+            .count();
         let total_links = nodes.iter().filter(|n| n.parent_ref.is_some()).count();
 
         if blinded > 0 {
@@ -363,7 +368,11 @@ mod tests {
         let observer = NexObserver::new(epas, peers, rep, idx, prov, deriv);
         let report = observer.report().await;
 
-        let integrity = report.findings.iter().find(|f| f.check == "epa_integrity").unwrap();
+        let integrity = report
+            .findings
+            .iter()
+            .find(|f| f.check == "epa_integrity")
+            .unwrap();
         assert_eq!(integrity.severity, Severity::Ok);
     }
 
@@ -373,7 +382,11 @@ mod tests {
         let observer = NexObserver::new(epas, peers, rep, idx, prov, deriv);
 
         let report = observer.report().await;
-        let network = report.findings.iter().find(|f| f.check == "network_peers").unwrap();
+        let network = report
+            .findings
+            .iter()
+            .find(|f| f.check == "network_peers")
+            .unwrap();
         assert_eq!(network.severity, Severity::Warning);
     }
 

@@ -3,7 +3,7 @@
 use crate::decision::DecisionStatus;
 use crate::evidence::{EvidenceKind, EvidenceRecord};
 use crate::hash::canonical_hash;
-use crate::provenance::aggregator::{walk_provenance_chain, ProvenanceNode};
+use crate::provenance::aggregator::{walk_provenance_chain, ProvenanceNode, ProvenanceRef};
 use crate::types::EvidenceStrength;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -334,9 +334,9 @@ fn recompute_chain_strength(chain: &[EvidenceRecord]) -> EvidenceStrength {
         .enumerate()
         .map(|(index, record)| ProvenanceNode {
             node_id: record.body.evidence_id.to_string(),
-            parent_hash: index
-                .checked_sub(1)
-                .map(|parent_index| chain[parent_index].body.evidence_id.to_string()),
+            parent_ref: index.checked_sub(1).map(|parent_index| {
+                ProvenanceRef::active(chain[parent_index].body.evidence_id.to_string())
+            }),
             strength: evidence_kind_strength(record.body.kind),
             depth: index as u32,
         })

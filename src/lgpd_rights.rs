@@ -1,5 +1,5 @@
 // lgpd_rights.rs — LGPD Nível 2: Direitos do Titular
-// Indexação em memória, anonimização atômica, EPA de supressão.
+// Crypto-shredding, graph blinding, indexação reversa.
 
 use crate::hash::canonical_hash;
 use crate::lgpd::LawfulBasis;
@@ -101,6 +101,7 @@ pub struct AnonymizationResult {
     pub suppression_epa_id: String,
     pub fields_anonymized: Vec<String>,
     pub timestamp: DateTime<Utc>,
+    pub links_blinded: usize,
 }
 
 /// Dados exportáveis de um titular (portabilidade).
@@ -138,8 +139,8 @@ fn calc_expiry(retention_days: u32, created_at: &str) -> DateTime<Utc> {
     created + chrono::Duration::days(retention_days as i64)
 }
 
-/// Anonimiza dados pessoais dentro de um SharedEPA.
-/// Zera state_hash, evidence_hash e preserva apenas hashes de integridade.
+/// Crypto-shredding: anonimiza dados pessoais dentro de um SharedEPA.
+/// Remove payload encriptado, chaves, hashes derivados, E lgpd_metadata.
 /// Retorna o EPA modificado e uma descrição dos campos alterados.
 pub fn anonymize_epa_fields(epa: &mut SharedEPA) -> Vec<String> {
     let mut fields = Vec::new();
@@ -162,6 +163,13 @@ pub fn anonymize_epa_fields(epa: &mut SharedEPA) -> Vec<String> {
     if epa.evidence_hash != zero {
         epa.evidence_hash = zero;
         fields.push("evidence_hash".to_string());
+    }
+
+    // Crypto-shredding: remove lgpd_metadata inteiro
+    // Isso destrói data_subject_hash, consent_id, dpia_ref
+    if epa.lgpd_metadata.is_some() {
+        epa.lgpd_metadata = None;
+        fields.push("lgpd_metadata".to_string());
     }
 
     fields

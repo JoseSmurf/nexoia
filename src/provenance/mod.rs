@@ -4,6 +4,11 @@ pub mod typed_node;
 pub mod witness;
 
 #[allow(unused_imports)]
+pub use aggregator::{
+    blind_derivation_links, DerivationIndex, ProvenanceChain, ProvenanceNode, ProvenanceRef,
+};
+
+#[allow(unused_imports)]
 pub use compose::{derive, MinStrength};
 
 #[allow(unused_imports)]

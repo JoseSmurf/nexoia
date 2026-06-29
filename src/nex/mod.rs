@@ -3,6 +3,7 @@ pub mod ast;
 pub mod checkpoint;
 pub mod eval;
 pub mod layers;
+pub mod observer;
 pub mod parser;
 pub mod reactive;
 

@@ -2,7 +2,6 @@
 // Lock order: see GLOBAL LOCK ORDER comment below
 #![allow(dead_code, unused_imports)]
 #![allow(clippy::upper_case_acronyms)]
-#![allow(clippy::too_many_arguments)]
 
 mod ai;
 mod decision;
@@ -165,118 +164,124 @@ fn add_default_rules(re: &mut crate::nex::reactive::ReactiveEngine) {
     });
 }
 
-fn spawn_tasks(
-    node: &NodeIdentity,
-    cfg: &Config,
-    udp_addr: SocketAddr,
-    epas: &Arc<RwLock<Vec<SharedEPA>>>,
-    peers: &Arc<RwLock<PeerList>>,
-    trusted: &Arc<RwLock<TrustedPeerList>>,
-    reputation: &Arc<RwLock<ReputationStore>>,
-    peer_states: &Arc<RwLock<HashMap<SocketAddr, PeerState>>>,
-    sm: &Arc<SessionManager>,
-    pending: &Arc<RwLock<HashMap<SocketAddr, PendingHandshake>>>,
-    udp_socket: Arc<UdpTransport>,
-    provenance_nodes: Arc<RwLock<Vec<crate::provenance::ProvenanceNode>>>,
-    data_path: &std::path::Path,
-    api_state: ApiState,
-    api_addr: SocketAddr,
-) {
-    tokio::spawn(run_heartbeat_sender(
-        node.clone(),
-        Arc::clone(trusted),
-        Arc::clone(peer_states),
-        udp_addr,
-    ));
-    let mut re = crate::nex::reactive::ReactiveEngine::with_layer(NexLayer::Advanced);
+/// Estado compartilhado do nó — agrupa todos os Arc<RwLock<...>> para simplificar assinaturas.
+pub struct NodeContext {
+    pub node: NodeIdentity,
+    cfg: Config,
+    pub udp_addr: std::net::SocketAddr,
+    pub epas: Arc<RwLock<Vec<SharedEPA>>>,
+    pub peers: Arc<RwLock<PeerList>>,
+    pub trusted: Arc<RwLock<TrustedPeerList>>,
+    pub reputation: Arc<RwLock<ReputationStore>>,
+    pub peer_states: Arc<RwLock<HashMap<std::net::SocketAddr, PeerState>>>,
+    pub sm: Arc<SessionManager>,
+    pub pending: Arc<RwLock<HashMap<std::net::SocketAddr, PendingHandshake>>>,
+    pub udp_socket: Arc<UdpTransport>,
+    pub provenance_nodes: Arc<RwLock<Vec<crate::provenance::ProvenanceNode>>>,
+    pub data_path: std::path::PathBuf,
+    pub api_state: ApiState,
+    pub api_addr: std::net::SocketAddr,
+}
 
-    // Tenta carregar regras de arquivo .nex (env NEXOIA_NEX_RULES)
-    if let Ok(nex_path) = std::env::var("NEXOIA_NEX_RULES") {
-        match re.load_from_file(&nex_path) {
-            Ok(count) => {
-                println!("NEX Rules:     Loaded {} rules from {}", count, nex_path);
-            }
-            Err(e) => {
-                eprintln!("⚠ NEX Rules load failed: {} (using defaults)", e);
-                add_default_rules(&mut re);
-            }
-        }
-    } else {
-        add_default_rules(&mut re);
-    }
-    tokio::spawn(run_heartbeat_monitor(
-        Arc::clone(peer_states),
-        Arc::clone(trusted),
-        Arc::clone(reputation),
-        re,
-        Arc::clone(sm),
-    ));
-    let pc = Arc::clone(pending);
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            let mut p = pc.write().await;
-            let before = p.len();
-            p.retain(|a, h| {
-                if h.is_expired(Duration::from_secs(300)) {
-                    eprintln!("  ⏰ Pending handshake expired for {}", a);
-                    false
-                } else {
-                    true
+impl NodeContext {
+    fn spawn_tasks(&self) {
+        tokio::spawn(run_heartbeat_sender(
+            self.node.clone(),
+            Arc::clone(&self.trusted),
+            Arc::clone(&self.peer_states),
+            self.udp_addr,
+        ));
+        let mut re = crate::nex::reactive::ReactiveEngine::with_layer(NexLayer::Advanced);
+
+        // Tenta carregar regras de arquivo .nex (env NEXOIA_NEX_RULES)
+        if let Ok(nex_path) = std::env::var("NEXOIA_NEX_RULES") {
+            match re.load_from_file(&nex_path) {
+                Ok(count) => {
+                    println!("NEX Rules:     Loaded {} rules from {}", count, nex_path);
                 }
-            });
-            let r = before.saturating_sub(p.len());
-            if r > 0 {
-                eprintln!("Handshake cleanup: removed {} expired", r);
+                Err(e) => {
+                    eprintln!("⚠ NEX Rules load failed: {} (using defaults)", e);
+                    add_default_rules(&mut re);
+                }
             }
+        } else {
+            add_default_rules(&mut re);
         }
-    });
-    let dp = data_path.to_path_buf();
-    tokio::spawn(run_udp_listener(
-        udp_socket,
-        node.clone(),
-        Arc::clone(epas),
-        Arc::clone(peers),
-        Arc::clone(trusted),
-        Arc::clone(reputation),
-        Arc::clone(peer_states),
-        dp,
-        cfg.disable_encryption,
-        Arc::clone(sm),
-        Arc::clone(pending),
-        Arc::clone(&provenance_nodes),
-    ));
-    let ac = api_addr;
-    let tls_cert = cfg.tls_cert.clone();
-    let tls_key = cfg.tls_key.clone();
-    tokio::spawn(async move {
-        let result = match (tls_cert, tls_key) {
-            (Some(cert), Some(key)) => {
-                println!(
-                    "TLS: ENABLED (cert: {}, key: {})",
-                    cert.display(),
-                    key.display()
-                );
-                api::create_api_tls(api_state, ac, &cert, &key).await
+        tokio::spawn(run_heartbeat_monitor(
+            Arc::clone(&self.peer_states),
+            Arc::clone(&self.trusted),
+            Arc::clone(&self.reputation),
+            re,
+            Arc::clone(&self.sm),
+        ));
+        let pc = Arc::clone(&self.pending);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                let mut p = pc.write().await;
+                let before = p.len();
+                p.retain(|a, h| {
+                    if h.is_expired(Duration::from_secs(300)) {
+                        eprintln!("  ⏰ Pending handshake expired for {}", a);
+                        false
+                    } else {
+                        true
+                    }
+                });
+                let r = before.saturating_sub(p.len());
+                if r > 0 {
+                    eprintln!("Handshake cleanup: removed {} expired", r);
+                }
             }
-            _ => api::create_api(api_state, ac).await,
-        };
-        if let Err(e) = result {
-            eprintln!("API error: {}", e);
+        });
+        let dp = self.data_path.clone();
+        tokio::spawn(run_udp_listener(
+            Arc::clone(&self.udp_socket),
+            self.node.clone(),
+            Arc::clone(&self.epas),
+            Arc::clone(&self.peers),
+            Arc::clone(&self.trusted),
+            Arc::clone(&self.reputation),
+            Arc::clone(&self.peer_states),
+            dp,
+            self.cfg.disable_encryption,
+            Arc::clone(&self.sm),
+            Arc::clone(&self.pending),
+            Arc::clone(&self.provenance_nodes),
+        ));
+        let ac = self.api_addr;
+        let tls_cert = self.cfg.tls_cert.clone();
+        let tls_key = self.cfg.tls_key.clone();
+        let api_state = self.api_state.clone();
+        tokio::spawn(async move {
+            let result = match (tls_cert, tls_key) {
+                (Some(cert), Some(key)) => {
+                    println!(
+                        "TLS: ENABLED (cert: {}, key: {})",
+                        cert.display(),
+                        key.display()
+                    );
+                    api::create_api_tls(api_state, ac, &cert, &key).await
+                }
+                _ => api::create_api(api_state, ac).await,
+            };
+            if let Err(e) = result {
+                eprintln!("API error: {}", e);
+            }
+        });
+        if self.cfg.tls_cert.is_some() && self.cfg.tls_key.is_some() {
+            println!("API listening on https://{}", self.api_addr);
+        } else {
+            println!("API listening on http://{}", self.api_addr);
         }
-    });
-    if cfg.tls_cert.is_some() && cfg.tls_key.is_some() {
-        println!("API listening on https://{}", api_addr);
-    } else {
-        println!("API listening on http://{}", api_addr);
+        let ba: SocketAddr = ([255, 255, 255, 255], self.cfg.broadcast_port).into();
+        tokio::spawn(run_discovery(
+            self.node.clone(),
+            self.udp_addr.port(),
+            ba,
+            Arc::clone(&self.peers),
+        ));
     }
-    let ba: SocketAddr = ([255, 255, 255, 255], cfg.broadcast_port).into();
-    tokio::spawn(run_discovery(
-        node.clone(),
-        udp_addr.port(),
-        ba,
-        Arc::clone(peers),
-    ));
 }
 
 #[tokio::main]
@@ -396,31 +401,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
         provenance_nodes: Arc::clone(&provenance_nodes),
         derivation_index: Arc::clone(&derivation_index),
     };
-    spawn_tasks(
-        &node,
-        &cfg,
+    let ctx = NodeContext {
+        node,
+        cfg,
         udp_addr,
-        &epas,
-        &peers,
-        &trusted_peers,
-        &reputation,
-        &peer_states,
-        &sm,
-        &pending,
+        epas,
+        peers,
+        trusted: trusted_peers,
+        reputation,
+        peer_states,
+        sm,
+        pending,
         udp_socket,
-        Arc::clone(&provenance_nodes),
-        &data_path,
+        provenance_nodes: Arc::clone(&provenance_nodes),
+        data_path,
         api_state,
         api_addr,
-    );
+    };
+    ctx.spawn_tasks();
     run_pipeline(
-        &node,
-        &peers,
-        &epas,
-        &trusted_peers,
-        &data_path,
+        &ctx.node,
+        &ctx.peers,
+        &ctx.epas,
+        &ctx.trusted,
+        &ctx.data_path,
         Some(lgpd_index),
-        &provenance_nodes,
+        &ctx.provenance_nodes,
     )
     .await?;
     println!("\nNode running. Press Ctrl+C to stop.");
@@ -428,11 +434,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Graceful shutdown: save state before exiting
     println!("Shutting down... saving state");
-    if let Err(e) = reputation.read().await.save() {
+    if let Err(e) = ctx.reputation.read().await.save() {
         eprintln!("Failed to save reputation: {}", e);
     }
-    persistence::save_network_state(&data_path, &peers, &epas, &trusted_peers, &provenance_nodes)
-        .await;
+    persistence::save_network_state(
+        &ctx.data_path,
+        &ctx.peers,
+        &ctx.epas,
+        &ctx.trusted,
+        &ctx.provenance_nodes,
+    )
+    .await;
     println!("State saved. Goodbye!");
 
     Ok(())

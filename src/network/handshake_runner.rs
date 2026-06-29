@@ -107,12 +107,10 @@ pub async fn run_udp_listener(
 
                     // Busca handshake pendente
                     let mut pending = pending_handshakes.write().await;
-                    let hs = pending.get_mut(&addr);
-                    if hs.is_none() {
+                    let Some(hs) = pending.get_mut(&addr) else {
                         eprintln!("  ✗ No pending handshake for {}", addr);
                         continue;
-                    }
-                    let hs = hs.unwrap();
+                    };
 
                     // Assina o challenge
                     let challenge_input = format!("{}:{}", challenge_hash, timestamp);
@@ -154,9 +152,15 @@ pub async fn run_udp_listener(
                         };
 
                         // Verifica assinatura Ed25519
-                        let pubkey_hex = hs.remote_ed25519_pubkey.as_ref().unwrap();
-                        let challenge = hs.challenge_hash.as_ref().unwrap();
-                        let timestamp = hs.challenge_timestamp.as_ref().unwrap();
+                        let Some(pubkey_hex) = hs.remote_ed25519_pubkey.as_ref() else {
+                            break 'hs Err("missing remote Ed25519 pubkey".to_string());
+                        };
+                        let Some(challenge) = hs.challenge_hash.as_ref() else {
+                            break 'hs Err("missing challenge hash".to_string());
+                        };
+                        let Some(timestamp) = hs.challenge_timestamp.as_ref() else {
+                            break 'hs Err("missing challenge timestamp".to_string());
+                        };
                         let challenge_input = format!("{}:{}", challenge, timestamp);
 
                         let valid = crate::network::identity::verify_signature(
@@ -480,12 +484,10 @@ pub async fn run_udp_listener(
                 // ============================================
                 NetworkMessage::SecureMessage(secure_msg) => {
                     // Busca sessão
-                    let session = session_manager.get(&addr).await;
-                    if session.is_none() {
+                    let Some(session) = session_manager.get(&addr).await else {
                         eprintln!("  ✗ No session for {}", addr);
                         continue;
-                    }
-                    let session = session.unwrap();
+                    };
 
                     // Decripta mensagem
                     match secure_msg.decrypt(&session.session_key) {

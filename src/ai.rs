@@ -6,6 +6,7 @@
 use std::fmt;
 
 use crate::defense::ValidationError;
+use crate::hash::canonical_hash;
 use crate::types::{EvidenceProvider, EvidenceStrength, NexAssertion};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -184,7 +185,8 @@ impl EvidenceProvider for EvidenceEngine {
         let context_id = if let Some(run_id) = json.get("run_id").and_then(|v| v.as_str()) {
             format!("ctx_{}", &run_id[..8.min(run_id.len())])
         } else {
-            format!("ctx_{:08x}", crc32_hash(raw))
+            let hash = canonical_hash(raw);
+            format!("ctx_{}", &hash[..8])
         };
 
         Ok(NexAssertion {
@@ -215,22 +217,6 @@ fn evaluate_purpose(purpose: &str) -> PurposeQuality {
     } else {
         PurposeQuality::Generic
     }
-}
-
-/// CRC32 simples para geração determinística de context_id.
-fn crc32_hash(input: &str) -> u32 {
-    let mut crc: u32 = 0xFFFFFFFF;
-    for byte in input.bytes() {
-        crc ^= byte as u32;
-        for _ in 0..8 {
-            if crc & 1 != 0 {
-                crc = (crc >> 1) ^ 0xEDB88320;
-            } else {
-                crc >>= 1;
-            }
-        }
-    }
-    !crc
 }
 
 /// Mantém compatibilidade com código existente.

@@ -131,7 +131,9 @@ impl PeerState {
             return true;
         }
 
-        let last = self.heartbeat_window.last().unwrap();
+        let Some(last) = self.heartbeat_window.last() else {
+            return true;
+        };
         let age = Utc::now() - *last;
 
         // Inativo se: idade > timeout E misses suficientes

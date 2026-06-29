@@ -346,7 +346,7 @@ Se o módulo produz dados, esses dados precisam ser acessíveis via API:
 | `NEXOIA_NODE_NAME` | nexoia-node | Nome do nó |
 | `NEXOIA_DATA_DIR` | data | Diretório de dados |
 | `NEXOIA_PASSPHRASE` | (nenhum) | **Recomendado em produção** |
-| `NEXOIA_DISABLE_ENCRYPTION` | false | Desabilita criptografia |
+| `NEXOIA_DISABLE_ENCRYPTION` | (vazio) | Desabilita criptografia (set `1` para ativar) |
 | `NEXOIA_BOOTSTRAP_PEERS` | (nenhum) | Peers iniciais `ip:port` |
 
 ### Pipeline

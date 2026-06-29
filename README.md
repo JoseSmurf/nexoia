@@ -81,23 +81,23 @@ NEXOIA_PASSPHRASE="minha-senha-forte" cargo run
 ### Verificando a rede
 
 ```bash
-curl http://localhost:3000/health    # Health check
-curl http://localhost:3000/node     # Info do nó
-curl http://localhost:3000/epa/list # Listar EPAs
+curl http://localhost:8080/health    # Health check
+curl http://localhost:8080/node     # Info do nó
+curl http://localhost:8080/epa/list # Listar EPAs
 ```
 
 ## Variáveis de Ambiente
 
 | Variável | Default | Descrição | Exemplo |
 |----------|---------|-----------|---------|
-| `NEXOIA_API_PORT` | `3000` | Porta da API HTTP | `3001` |
+| `NEXOIA_API_PORT` | `8080` | Porta da API HTTP | `3001` |
 | `NEXOIA_UDP_PORT` | `9000` | Porta UDP | `9001` |
 | `NEXOIA_BROADCAST_PORT` | `9001` | Porta de broadcast | `9002` |
 | `NEXOIA_MAX_PEERS` | `10` | Máximo de peers | `20` |
-| `NEXOIA_NODE_NAME` | `nexoia_node` | Nome do nó | `node_alpha` |
-| `NEXOIA_DATA_DIR` | `.nexoia` | Diretório de dados | `/var/lib/nexoia` |
+| `NEXOIA_NODE_NAME` | `nexoia-node` | Nome do nó | `node_alpha` |
+| `NEXOIA_DATA_DIR` | `data` | Diretório de dados | `/var/lib/nexoia` |
 | `NEXOIA_PASSPHRASE` | (nenhuma) | Passphrase para chaves | `"senha-forte"` |
-| `NEXOIA_DISABLE_ENCRYPTION` | `false` | Desabilitar encriptação | `true` |
+| `NEXOIA_DISABLE_ENCRYPTION` | `""` | Desabilitar encriptação (set `1` para ativar) | `1` |
 | `NEXOIA_BOOTSTRAP_PEERS` | (nenhum) | Peers iniciais | `"host1:9000,host2:9000"` |
 
 ## Boas Práticas de Segurança

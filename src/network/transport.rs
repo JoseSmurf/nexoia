@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 
 /// Mensagens de rede entre nós.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NetworkMessage {
     EPA(SharedEPA),
@@ -82,6 +83,12 @@ const HEARTBEAT_WINDOW_SIZE: usize = 5;
 
 /// Número mínimo de misses na janela para considerar inativo.
 const MIN_MISSES_FOR_INACTIVE: u32 = 3;
+
+impl Default for PeerState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl PeerState {
     pub fn new() -> Self {

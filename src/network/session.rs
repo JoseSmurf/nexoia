@@ -148,8 +148,8 @@ fn shift_window_left(window: &mut [u64; WINDOW_WORDS], bits: u64) {
             window[i] = val;
         }
     }
-    for i in 0..word_shift.min(WINDOW_WORDS) {
-        window[i] = 0;
+    for w in window.iter_mut().take(word_shift.min(WINDOW_WORDS)) {
+        *w = 0;
     }
 }
 
@@ -241,6 +241,10 @@ impl SessionManager {
     pub async fn len(&self) -> usize {
         let sessions = self.sessions.read().await;
         sessions.len()
+    }
+
+    pub async fn is_empty(&self) -> bool {
+        self.len().await == 0
     }
 
     /// Verifica e atualiza o contador anti-replay diretamente na sessão armazenada.

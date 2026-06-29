@@ -10,6 +10,10 @@ use super::{
     NEX_VERSION,
 };
 
+/// Arena allocator for temporary parsing allocations.
+/// Reduces per-token/per-statement allocations during parsing.
+type Arena<'a> = bumpalo::Bump;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
     Syntax {
@@ -91,6 +95,7 @@ impl TokenKind {
 }
 
 pub fn parse(source: &str) -> Result<Program, ParseError> {
+    let arena = Arena::new();
     let mut statements = Vec::new();
     let mut first_statement_seen = false;
 
@@ -117,7 +122,7 @@ pub fn parse(source: &str) -> Result<Program, ParseError> {
             }
         }
 
-        let tokens = lex_line(raw_line, line_no)?;
+        let tokens = lex_line(&arena, raw_line, line_no)?;
         if tokens.is_empty() {
             continue;
         }
@@ -138,7 +143,7 @@ fn is_comment_line(line: &str) -> bool {
     line.starts_with('#') || line.starts_with("//")
 }
 
-fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
+fn lex_line(arena: &Arena, line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
     let chars: Vec<char> = line.chars().collect();
     let mut tokens = Vec::new();
     let mut idx = 0;
@@ -199,7 +204,7 @@ fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
             }
             '"' => {
                 idx += 1;
-                let mut value = String::new();
+                let mut value = bumpalo::collections::String::new_in(arena);
                 let mut closed = false;
 
                 while idx < chars.len() {
@@ -241,7 +246,7 @@ fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
                 }
 
                 Token {
-                    kind: TokenKind::Str(value),
+                    kind: TokenKind::Str(value.into_bump_str().to_string()),
                     column,
                 }
             }
@@ -346,7 +351,7 @@ fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
                     }
                     idx += 1;
                 }
-                let text: String = chars[start..idx].iter().collect();
+                let text: String = chars[start..idx].iter().collect::<String>();
                 if text.is_empty() {
                     return Err(ParseError::new(
                         line_no,
@@ -355,13 +360,13 @@ fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
                     ));
                 }
                 Token {
-                    kind: TokenKind::Word(text),
+                    kind: TokenKind::Word(arena.alloc_str(&text).to_string()),
                     column,
                 }
             }
         };
 
-        tokens.push(token);
+tokens.push(token);
     }
 
     Ok(tokens)
@@ -605,7 +610,7 @@ fn parse_act(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError> {
             "expected 'requires' after action",
         )
     })?;
-    if word(requires_token, line_no)?.to_ascii_lowercase() != "requires" {
+    if !word(requires_token, line_no)?.eq_ignore_ascii_case("requires") {
         return Err(ParseError::new(
             line_no,
             requires_token.column,

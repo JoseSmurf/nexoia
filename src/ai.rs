@@ -42,17 +42,12 @@ struct EvidenceFactors {
     purpose_quality: PurposeQuality,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 enum PurposeQuality {
+    #[default]
     Empty,
     Generic,
     Specific,
-}
-
-impl Default for PurposeQuality {
-    fn default() -> Self {
-        PurposeQuality::Empty
-    }
 }
 
 /// Motor de análise de evidências.

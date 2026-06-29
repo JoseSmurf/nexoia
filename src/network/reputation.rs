@@ -43,7 +43,7 @@ impl NodeReputation {
         self.last_seen = Utc::now();
 
         // Reset falhas após 100 sucessos
-        if self.successes % 100 == 0 {
+        if self.successes.is_multiple_of(100) {
             self.failures = 0;
         }
     }
@@ -70,6 +70,12 @@ impl NodeReputation {
 pub struct ReputationStore {
     reputations: BTreeMap<String, NodeReputation>,
     path: Option<std::path::PathBuf>,
+}
+
+impl Default for ReputationStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ReputationStore {

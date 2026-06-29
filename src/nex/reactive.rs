@@ -99,6 +99,12 @@ pub struct ReactiveEngine {
     layer: NexLayer,
 }
 
+impl Default for ReactiveEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReactiveEngine {
     pub fn new() -> Self {
         Self {

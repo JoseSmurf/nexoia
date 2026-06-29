@@ -20,6 +20,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Result of pending handshake exchange (extracted under lock, used after lock release).
+type PendingExchangeResult = ([u8; 32], String, String, [u8; 32], [u8; 32], [u8; 32]);
+
 /// Listener UDP com handshake e verificação assíncrona de EPA.
 pub async fn run_udp_listener(
     transport: Arc<UdpTransport>,
@@ -223,7 +226,7 @@ pub async fn run_udp_listener(
                         );
 
                         // Salva chave de sessão para verificação no SessionKeyConfirm
-                        let session_key_bytes: [u8; 32] = session_key.into();
+                        let session_key_bytes = session_key;
                         hs.session_key = Some(session_key_bytes);
 
                         // Assina parâmetros da sessão
@@ -267,14 +270,7 @@ pub async fn run_udp_listener(
                     println!("Handshake: SessionKeyExchange from {}", addr);
 
                     // Step 1: Compute session key while holding pending, then release
-                    let pending_result: Option<(
-                        [u8; 32],
-                        String,
-                        String,
-                        [u8; 32],
-                        [u8; 32],
-                        [u8; 32],
-                    )> = {
+                    let pending_result: Option<PendingExchangeResult> = {
                         let mut pending = pending_handshakes.write().await;
                         let hs = match pending.get_mut(&addr) {
                             Some(hs) => hs,
@@ -386,14 +382,7 @@ pub async fn run_udp_listener(
                     println!("Handshake: SessionKeyConfirm from {}", addr);
 
                     // Step 1: Extract data from pending, verify OK, release lock
-                    let confirm_result: Option<(
-                        [u8; 32],
-                        String,
-                        String,
-                        [u8; 32],
-                        [u8; 32],
-                        [u8; 32],
-                    )> = {
+                    let confirm_result: Option<PendingExchangeResult> = {
                         let mut pending = pending_handshakes.write().await;
                         let hs = match pending.get_mut(&addr) {
                             Some(hs) => hs,
@@ -738,11 +727,6 @@ pub async fn run_udp_listener(
                         )
                         .await;
                     });
-                }
-
-                // Mensagens legadas (compatibilidade)
-                _ => {
-                    println!("  ⚠ Received legacy message from {}", addr);
                 }
             },
             Err(e) => {

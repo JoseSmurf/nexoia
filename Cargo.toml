@@ -31,7 +31,7 @@ parking_lot = "0.12"
 ahash = "0.8"
 smallvec = "1"
 bytes = "1"
-bumpalo = "3"
+bumpalo = { version = "3", features = ["collections"] }
 static_assertions = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }

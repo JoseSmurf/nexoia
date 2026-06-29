@@ -27,6 +27,12 @@ pub struct LgpdIndex {
     index: HashMap<String, Vec<EpaRef>>,
 }
 
+impl Default for LgpdIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LgpdIndex {
     pub fn new() -> Self {
         Self {
@@ -252,7 +258,7 @@ mod tests {
 
         idx.remove_epa("hash1", "abc123");
         assert_eq!(idx.count(), 0);
-        assert!(idx.index.get("hash1").is_none());
+        assert!(!idx.index.contains_key("hash1"));
     }
 
     #[test]

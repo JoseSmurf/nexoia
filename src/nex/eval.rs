@@ -417,34 +417,34 @@ fn evaluate_condition(condition: &Condition, working: &HashMap<String, RuntimeSt
         let right_record = condition.right_id.as_ref().and_then(|id| working.get(id));
         let right_matches = match (op, &condition.right_comparator, &condition.right_strength2) {
             (LogicalOp::And, Some(Comparator::Gte), Some(s2)) => {
-                right_record.map_or(false, |r| r.strength >= *s2)
+                right_record.is_some_and(|r| r.strength >= *s2)
             }
             (LogicalOp::And, Some(Comparator::Lte), Some(s2)) => {
-                right_record.map_or(false, |r| r.strength <= *s2)
+                right_record.is_some_and(|r| r.strength <= *s2)
             }
             (LogicalOp::And, Some(Comparator::Gt), Some(s2)) => {
-                right_record.map_or(false, |r| r.strength > *s2)
+                right_record.is_some_and(|r| r.strength > *s2)
             }
             (LogicalOp::And, Some(Comparator::Lt), Some(s2)) => {
-                right_record.map_or(false, |r| r.strength < *s2)
+                right_record.is_some_and(|r| r.strength < *s2)
             }
             (LogicalOp::And, Some(Comparator::Eq), Some(s2)) => {
-                right_record.map_or(false, |r| r.strength == *s2)
+                right_record.is_some_and(|r| r.strength == *s2)
             }
             (LogicalOp::Or, Some(Comparator::Gte), Some(s2)) => {
-                right_record.map_or(false, |r| r.strength >= *s2)
+                right_record.is_some_and(|r| r.strength >= *s2)
             }
             (LogicalOp::Or, Some(Comparator::Lte), Some(s2)) => {
-                right_record.map_or(false, |r| r.strength <= *s2)
+                right_record.is_some_and(|r| r.strength <= *s2)
             }
             (LogicalOp::Or, Some(Comparator::Gt), Some(s2)) => {
-                right_record.map_or(false, |r| r.strength > *s2)
+                right_record.is_some_and(|r| r.strength > *s2)
             }
             (LogicalOp::Or, Some(Comparator::Lt), Some(s2)) => {
-                right_record.map_or(false, |r| r.strength < *s2)
+                right_record.is_some_and(|r| r.strength < *s2)
             }
             (LogicalOp::Or, Some(Comparator::Eq), Some(s2)) => {
-                right_record.map_or(false, |r| r.strength == *s2)
+                right_record.is_some_and(|r| r.strength == *s2)
             }
             _ => false,
         };

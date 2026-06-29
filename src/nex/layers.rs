@@ -51,17 +51,13 @@ pub fn required_layer(statements: &[Stmt]) -> NexLayer {
 
     for stmt in statements {
         match stmt {
-            Stmt::If { .. } => {
-                if NexLayer::Intermediate > max_layer {
-                    max_layer = NexLayer::Intermediate;
-                }
+            Stmt::If { .. } if NexLayer::Intermediate > max_layer => {
+                max_layer = NexLayer::Intermediate;
             }
-            Stmt::On { .. } => {
-                if NexLayer::Advanced > max_layer {
-                    max_layer = NexLayer::Advanced;
-                }
+            Stmt::On { .. } if NexLayer::Advanced > max_layer => {
+                max_layer = NexLayer::Advanced;
             }
-            _ => {} // Básica: Node, Attest, Derive, Assert, Act, Use
+            _ => {}
         }
     }
 
@@ -114,7 +110,7 @@ use std::fmt;
 mod tests {
     use super::*;
     use crate::nex::ast::{
-        Action, Comparator, Condition, Expr, LogicalOp, ReactiveAction, Trigger,
+        Action, Comparator, Condition, Expr, ReactiveAction, Trigger,
     };
 
     #[test]

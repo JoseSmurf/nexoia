@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct PersistedData {
     pub peers: Vec<String>,
     pub epas: Vec<SharedEPA>,
@@ -20,15 +20,7 @@ pub struct PersistedTrustedPeer {
     pub addr: String,
 }
 
-impl Default for PersistedData {
-    fn default() -> Self {
-        Self {
-            peers: Vec::new(),
-            epas: Vec::new(),
-            trusted_peers: Vec::new(),
-        }
-    }
-}
+
 
 pub fn load_data(path: &Path) -> Result<PersistedData, std::io::Error> {
     if !path.exists() {

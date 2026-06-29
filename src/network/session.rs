@@ -373,6 +373,7 @@ mod tests {
         assert!(!session.is_expired(std::time::Duration::from_secs(300)));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn cleanup_removes_expired_sessions() {
         let manager = SessionManager::new();
@@ -387,6 +388,7 @@ mod tests {
         assert_eq!(manager.len().await, 0);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn cleanup_keeps_fresh_sessions() {
         let manager = SessionManager::new();
@@ -400,6 +402,7 @@ mod tests {
         assert_eq!(manager.len().await, 1);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn session_manager_insert_and_get() {
         let manager = SessionManager::new();

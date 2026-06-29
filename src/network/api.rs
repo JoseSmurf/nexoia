@@ -540,6 +540,7 @@ mod tests {
 
     // ── Health ──────────────────────────────────────────────
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn health_endpoint_returns_ok() {
         let state = test_state().await;
@@ -558,6 +559,7 @@ mod tests {
 
     // ── Rate Limiter ────────────────────────────────────────
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn rate_limiter_blocks_after_limit() {
         let limiter = RateLimiter::new(2, std::time::Duration::from_secs(1));
@@ -567,6 +569,7 @@ mod tests {
         assert!(!limiter.check("127.0.0.1"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn rate_limiter_allows_different_ips() {
         let limiter = RateLimiter::new(1, std::time::Duration::from_secs(1));
@@ -576,6 +579,7 @@ mod tests {
         assert!(!limiter.check("127.0.0.1"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn rate_limiter_resets_after_window() {
         let limiter = RateLimiter::new(1, std::time::Duration::from_millis(100));
@@ -590,6 +594,7 @@ mod tests {
 
     // ── POST /epa/encrypted ─────────────────────────────────
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn encrypted_epa_valid_request() {
         let state = test_state().await;
@@ -629,6 +634,7 @@ mod tests {
         assert!(epa.ephemeral_public_key.is_some());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn encrypted_epa_invalid_hex_key() {
         let state = test_state().await;
@@ -664,6 +670,7 @@ mod tests {
         assert!(err.error.contains("invalid hex"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn encrypted_epa_key_wrong_length() {
         let state = test_state().await;
@@ -699,6 +706,7 @@ mod tests {
         assert!(err.error.contains("32 bytes"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn encrypted_epa_missing_field() {
         let state = test_state().await;
@@ -729,6 +737,7 @@ mod tests {
 
     // ── GET /epa/{id}/verify-quick ──────────────────────────
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn verify_quick_existing_epa() {
         let state = test_state().await;
@@ -770,6 +779,7 @@ mod tests {
         assert_eq!(resp.epa_id, epa_id);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn verify_quick_nonexistent_epa() {
         let state = test_state().await;
@@ -791,6 +801,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn verify_quick_tampered_epa() {
         let state = test_state().await;
@@ -838,6 +849,7 @@ mod tests {
 
     // ── POST /epa (receive_epa) ─────────────────────────────
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn receive_epa_valid() {
         let state = test_state().await;
@@ -873,6 +885,7 @@ mod tests {
         assert_eq!(state.epas.read().await.len(), 1);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn receive_epa_tampered_rejected() {
         let state = test_state().await;
@@ -911,6 +924,7 @@ mod tests {
 
     // ── LGPD endpoints ─────────────────────────────────────
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn titular_dados_empty() {
         let state = test_state().await;
@@ -934,6 +948,7 @@ mod tests {
         assert!(refs.is_empty());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn titular_dados_with_indexed_epa() {
         let state = test_state().await;
@@ -971,6 +986,7 @@ mod tests {
         assert_eq!(refs[0].epa_id, "epa1");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn titular_export_returns_portability() {
         let state = test_state().await;
@@ -1008,6 +1024,7 @@ mod tests {
         assert_eq!(export.epas.len(), 1);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn titular_anonymize_not_found() {
         let state = test_state().await;
@@ -1027,6 +1044,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn titular_anonymize_with_epa() {
         let state = test_state().await;
@@ -1094,6 +1112,7 @@ mod tests {
             .any(|e| e.epa_id == results[0].suppression_epa_id));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn titular_revoke_not_found() {
         let state = test_state().await;
@@ -1113,6 +1132,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn titular_revoke_consentimento() {
         let state = test_state().await;
@@ -1156,6 +1176,7 @@ mod tests {
         assert!(index.lookup("subject3").is_empty());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn titular_revoke_non_consentimento_not_revoked() {
         let state = test_state().await;

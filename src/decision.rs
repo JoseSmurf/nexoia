@@ -136,21 +136,31 @@ fn classify_auto(state: &State) -> (DecisionStatus, String, String) {
     let margin_pct = if state.threshold != 0 {
         (margin as f64 / state.threshold as f64) * 100.0
     } else {
-        if input_value > 0 { 100.0 } else { 0.0 }
+        if input_value > 0 {
+            100.0
+        } else {
+            0.0
+        }
     };
 
     if margin >= 0 {
         // Base 25 (suficiente para OK) + bônus proporcional
         let bonus = (margin_pct / 10.0).min(10.0);
-        score.add_positive(25.0 + bonus, format!(
-            "input_value {input_value} meets threshold {} (margin: {margin}, {margin_pct:.1}%)",
-            state.threshold
-        ));
+        score.add_positive(
+            25.0 + bonus,
+            format!(
+                "input_value {input_value} meets threshold {} (margin: {margin}, {margin_pct:.1}%)",
+                state.threshold
+            ),
+        );
     } else {
-        score.add_negative(margin_pct.abs().min(100.0), format!(
+        score.add_negative(
+            margin_pct.abs().min(100.0),
+            format!(
             "input_value {input_value} below threshold {} (deficit: {margin}, {margin_pct:.1}%)",
             state.threshold
-        ));
+        ),
+        );
     }
 
     // Fator 2: LGPD compliance

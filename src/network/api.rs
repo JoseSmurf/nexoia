@@ -143,17 +143,25 @@ pub async fn create_api_tls(
     let mut cert_reader = BufReader::new(cert_file);
     let certs: Vec<rustls::pki_types::CertificateDer> = rustls_pemfile::certs(&mut cert_reader)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("cert parse: {e}")))?;
+        .map_err(|e| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("cert parse: {e}"))
+        })?;
 
     let mut key_reader = BufReader::new(key_file);
     let key = rustls_pemfile::private_key(&mut key_reader)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("key parse: {e}")))?
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "no private key found"))?;
+        .map_err(|e| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("key parse: {e}"))
+        })?
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "no private key found")
+        })?;
 
     let mut tls_config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("TLS config: {e}")))?;
+        .map_err(|e| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("TLS config: {e}"))
+        })?;
 
     tls_config.alpn_protocols = vec![b"http/1.1".to_vec()];
 
@@ -176,10 +184,7 @@ pub async fn create_api_tls(
                     if let Err(e) = hyper_util::server::conn::auto::Builder::new(
                         hyper_util::rt::TokioExecutor::new(),
                     )
-                    .serve_connection(
-                        hyper_util::rt::TokioIo::new(tls_stream),
-                        hyper_service,
-                    )
+                    .serve_connection(hyper_util::rt::TokioIo::new(tls_stream), hyper_service)
                     .await
                     {
                         eprintln!("TLS session error: {}", e);

@@ -229,12 +229,14 @@ fn spawn_tasks(
     tokio::spawn(async move {
         let result = match (tls_cert, tls_key) {
             (Some(cert), Some(key)) => {
-                println!("TLS: ENABLED (cert: {}, key: {})", cert.display(), key.display());
+                println!(
+                    "TLS: ENABLED (cert: {}, key: {})",
+                    cert.display(),
+                    key.display()
+                );
                 api::create_api_tls(api_state, ac, &cert, &key).await
             }
-            _ => {
-                api::create_api(api_state, ac).await
-            }
+            _ => api::create_api(api_state, ac).await,
         };
         if let Err(e) = result {
             eprintln!("API error: {}", e);

@@ -91,8 +91,8 @@ impl EvidenceEngine {
 
         // Verifica run_id determinístico
         if let Some(run_id) = json.get("run_id").and_then(|v| v.as_str()) {
-            factors.has_deterministic_id = !run_id.is_empty()
-                && run_id != "00000000-0000-0000-0000-000000000000";
+            factors.has_deterministic_id =
+                !run_id.is_empty() && run_id != "00000000-0000-0000-0000-000000000000";
         }
 
         // Verifica threshold e input_value
@@ -167,8 +167,8 @@ impl EvidenceProvider for EvidenceEngine {
             return Err(AIError::InputValidationError(e));
         }
 
-        let json: serde_json::Value = serde_json::from_str(raw)
-            .map_err(|e| AIError::InvalidJson(e.to_string()))?;
+        let json: serde_json::Value =
+            serde_json::from_str(raw).map_err(|e| AIError::InvalidJson(e.to_string()))?;
 
         let factors = self.analyze_factors(&json);
         let score = self.calculate_score(&factors);

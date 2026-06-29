@@ -146,6 +146,34 @@ impl ReactiveEngine {
         self.rules.clear();
     }
 
+    /// Carrega regras reativas de um programa NEX parseado.
+    /// Retorna o número de regras adicionadas.
+    pub fn load_from_program(&mut self, program: &crate::nex::ast::Program) -> usize {
+        let mut count = 0;
+        for stmt in &program.statements {
+            if let crate::nex::ast::Stmt::On { trigger, actions } = stmt {
+                let rule = ReactiveRule {
+                    trigger: trigger.clone(),
+                    actions: actions.clone(),
+                };
+                if self.add_rule(rule).is_ok() {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
+    /// Carrega regras de um arquivo .nex.
+    /// Retorna o número de regras adicionadas ou erro de parse.
+    pub fn load_from_file(&mut self, path: &str) -> Result<usize, String> {
+        let source =
+            std::fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"))?;
+        let program = crate::nex::parser::parse(&source)
+            .map_err(|e| format!("parse error in {path}: {e}"))?;
+        Ok(self.load_from_program(&program))
+    }
+
     /// Avalia um evento contra todas as regras.
     /// Retorna ações a serem executadas (determinístico).
     pub fn evaluate(&self, event: &NetworkEvent) -> EvaluationResult {

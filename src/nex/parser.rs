@@ -10,10 +10,6 @@ use super::{
     NEX_VERSION,
 };
 
-/// Arena allocator for temporary parsing allocations.
-/// Reduces per-token/per-statement allocations during parsing.
-type Arena<'a> = bumpalo::Bump;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
     Syntax {
@@ -95,7 +91,6 @@ impl TokenKind {
 }
 
 pub fn parse(source: &str) -> Result<Program, ParseError> {
-    let arena = Arena::new();
     let mut statements = Vec::new();
     let mut first_statement_seen = false;
 
@@ -122,7 +117,7 @@ pub fn parse(source: &str) -> Result<Program, ParseError> {
             }
         }
 
-        let tokens = lex_line(&arena, raw_line, line_no)?;
+        let tokens = lex_line(raw_line, line_no)?;
         if tokens.is_empty() {
             continue;
         }
@@ -143,7 +138,7 @@ fn is_comment_line(line: &str) -> bool {
     line.starts_with('#') || line.starts_with("//")
 }
 
-fn lex_line(arena: &Arena, line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
+fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
     let chars: Vec<char> = line.chars().collect();
     let mut tokens = Vec::new();
     let mut idx = 0;
@@ -204,7 +199,7 @@ fn lex_line(arena: &Arena, line: &str, line_no: usize) -> Result<Vec<Token>, Par
             }
             '"' => {
                 idx += 1;
-                let mut value = bumpalo::collections::String::new_in(arena);
+                let mut value = String::new();
                 let mut closed = false;
 
                 while idx < chars.len() {
@@ -246,7 +241,7 @@ fn lex_line(arena: &Arena, line: &str, line_no: usize) -> Result<Vec<Token>, Par
                 }
 
                 Token {
-                    kind: TokenKind::Str(value.into_bump_str().to_string()),
+                    kind: TokenKind::Str(value),
                     column,
                 }
             }
@@ -360,7 +355,7 @@ fn lex_line(arena: &Arena, line: &str, line_no: usize) -> Result<Vec<Token>, Par
                     ));
                 }
                 Token {
-                    kind: TokenKind::Word(arena.alloc_str(&text).to_string()),
+                    kind: TokenKind::Word(text),
                     column,
                 }
             }

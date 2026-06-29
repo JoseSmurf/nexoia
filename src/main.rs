@@ -150,6 +150,21 @@ async fn bootstrap_peers(
     }
 }
 
+fn add_default_rules(re: &mut crate::nex::reactive::ReactiveEngine) {
+    let _ = re.add_rule(crate::nex::reactive::ReactiveRule {
+        trigger: crate::nex::ast::Trigger::HeartbeatMiss { threshold: 3 },
+        actions: vec![crate::nex::ast::ReactiveAction::Log(
+            "Peer possivelmente inativo".into(),
+        )],
+    });
+    let _ = re.add_rule(crate::nex::reactive::ReactiveRule {
+        trigger: crate::nex::ast::Trigger::HeartbeatMiss { threshold: 5 },
+        actions: vec![crate::nex::ast::ReactiveAction::MarkInactive {
+            peer: "default".into(),
+        }],
+    });
+}
+
 fn spawn_tasks(
     node: &NodeIdentity,
     cfg: &Config,
@@ -174,18 +189,21 @@ fn spawn_tasks(
         udp_addr,
     ));
     let mut re = crate::nex::reactive::ReactiveEngine::with_layer(NexLayer::Advanced);
-    let _ = re.add_rule(crate::nex::reactive::ReactiveRule {
-        trigger: crate::nex::ast::Trigger::HeartbeatMiss { threshold: 3 },
-        actions: vec![crate::nex::ast::ReactiveAction::Log(
-            "Peer possivelmente inativo".into(),
-        )],
-    });
-    let _ = re.add_rule(crate::nex::reactive::ReactiveRule {
-        trigger: crate::nex::ast::Trigger::HeartbeatMiss { threshold: 5 },
-        actions: vec![crate::nex::ast::ReactiveAction::MarkInactive {
-            peer: "default".into(),
-        }],
-    });
+
+    // Tenta carregar regras de arquivo .nex (env NEXOIA_NEX_RULES)
+    if let Ok(nex_path) = std::env::var("NEXOIA_NEX_RULES") {
+        match re.load_from_file(&nex_path) {
+            Ok(count) => {
+                println!("NEX Rules:     Loaded {} rules from {}", count, nex_path);
+            }
+            Err(e) => {
+                eprintln!("⚠ NEX Rules load failed: {} (using defaults)", e);
+                add_default_rules(&mut re);
+            }
+        }
+    } else {
+        add_default_rules(&mut re);
+    }
     tokio::spawn(run_heartbeat_monitor(
         Arc::clone(peer_states),
         Arc::clone(trusted),

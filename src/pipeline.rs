@@ -54,6 +54,39 @@ pub async fn run_pipeline(
 
     let mut state = State::from_env()?;
 
+    // ── NEX Integration ──────────────────────────────────────
+    // Se NEXOIA_NEX_SOURCE estiver definido, executa programa NEX
+    // e usa os resultados pra enriquecer o state
+    if let Ok(nex_source) = std::env::var("NEXOIA_NEX_SOURCE") {
+        match crate::nex::parser::parse(&nex_source) {
+            Ok(program) => {
+                match crate::nex::eval::eval(program) {
+                    Ok(env) => {
+                        println!("NEX Eval:      {} bindings created", env.len());
+                        // NEX env pode injetar valores no state via variáveis
+                        for (key, value) in &env {
+                            if key == "input_value" {
+                                match value {
+                                    crate::nex::eval::TypedNodeValue::I(v) => {
+                                        state.input_value = Some(*v);
+                                    }
+                                    crate::nex::eval::TypedNodeValue::S(_) => {}
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("⚠ NEX eval error: {} (continuing without NEX)", e);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("⚠ NEX parse error: {} (continuing without NEX)", e);
+            }
+        }
+    }
+    // ── End NEX Integration ──────────────────────────────────
+
     if let Ok(basis_raw) = std::env::var("NEXOIA_LGPD_BASIS") {
         let purpose = std::env::var("NEXOIA_LGPD_PURPOSE")
             .map_err(|_| "NEXOIA_LGPD_PURPOSE required when NEXOIA_LGPD_BASIS is set")?;
@@ -135,6 +168,40 @@ pub async fn run_pipeline(
     );
 
     println!("\nEPA created: {}", epa);
+
+    // ── Observer Integration ──────────────────────────────────
+    // Observa o EPA recém-criado via locks compartilhados
+    {
+        let observer = crate::nex::observer::NexObserver::new(
+            Arc::clone(epas),
+            Arc::clone(peers),
+            Arc::new(tokio::sync::RwLock::new(
+                crate::network::reputation::ReputationStore::new(),
+            )),
+            Arc::new(tokio::sync::RwLock::new(
+                crate::lgpd_rights::LgpdIndex::new(),
+            )),
+            Arc::clone(provenance_nodes),
+            Arc::new(tokio::sync::RwLock::new(
+                crate::provenance::DerivationIndex::new(),
+            )),
+        );
+
+        let report = observer.report().await;
+        if report.overall != crate::nex::observer::Severity::Ok {
+            eprintln!(
+                "⚠ Observer: {} ({} findings)",
+                report.overall,
+                report.findings.len()
+            );
+            for finding in &report.findings {
+                if finding.severity != crate::nex::observer::Severity::Ok {
+                    eprintln!("  {}: {}", finding.check, finding.message);
+                }
+            }
+        }
+    }
+    // ── End Observer Integration ──────────────────────────────
 
     {
         let mut epa_list = epas.write().await;

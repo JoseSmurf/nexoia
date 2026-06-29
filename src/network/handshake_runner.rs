@@ -24,6 +24,7 @@ use tokio::sync::RwLock;
 type PendingExchangeResult = ([u8; 32], String, String, [u8; 32], [u8; 32], [u8; 32]);
 
 /// Listener UDP com handshake e verificação assíncrona de EPA.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_udp_listener(
     transport: Arc<UdpTransport>,
     node: NodeIdentity,

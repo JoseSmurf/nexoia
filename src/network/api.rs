@@ -122,7 +122,7 @@ pub async fn create_api(state: ApiState, addr: SocketAddr) -> Result<(), std::io
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .await
-    .map_err(|e| std::io::Error::other(e))?;
+    .map_err(std::io::Error::other)?;
 
     Ok(())
 }

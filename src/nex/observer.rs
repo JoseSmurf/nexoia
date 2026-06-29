@@ -8,9 +8,7 @@ use crate::network::epa::SharedEPA;
 use crate::network::reputation::ReputationStore;
 use crate::network::transport::PeerList;
 use crate::provenance::{DerivationIndex, ProvenanceNode};
-use crate::types::EvidenceStrength;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -247,7 +245,7 @@ impl NexObserver {
 
         let blinded = nodes
             .iter()
-            .filter(|n| n.parent_ref.as_ref().map_or(false, |p| p.is_blinded()))
+            .filter(|n| n.parent_ref.as_ref().is_some_and(|p| p.is_blinded()))
             .count();
         let total_links = nodes.iter().filter(|n| n.parent_ref.is_some()).count();
 
@@ -316,19 +314,21 @@ mod tests {
     use crate::network::epa::SharedEPA;
     use crate::network::identity::NodeIdentity;
     use crate::network::reputation::ReputationStore;
-    use crate::network::transport::{PeerList, TrustedPeerList};
+    use crate::network::transport::PeerList;
     use crate::provenance::{DerivationIndex, ProvenanceNode};
     use std::sync::Arc;
     use tokio::sync::RwLock;
 
-    fn test_state() -> (
+    type TestState = (
         Arc<RwLock<Vec<SharedEPA>>>,
         Arc<RwLock<PeerList>>,
         Arc<RwLock<ReputationStore>>,
         Arc<RwLock<LgpdIndex>>,
         Arc<RwLock<Vec<ProvenanceNode>>>,
         Arc<RwLock<DerivationIndex>>,
-    ) {
+    );
+
+    fn test_state() -> TestState {
         (
             Arc::new(RwLock::new(Vec::new())),
             Arc::new(RwLock::new(PeerList::new(10))),

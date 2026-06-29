@@ -7,6 +7,7 @@ use crate::network::epa::SharedEPA;
 use crate::network::identity::NodeIdentity;
 use crate::network::transport::{NetworkMessage, PeerList, UdpTransport};
 use crate::network::verify::{verify_epa, VerifyResult};
+use crate::provenance::{blind_derivation_links, DerivationIndex, ProvenanceNode};
 use axum::{
     extract::{ConnectInfo, Json, State},
     http::StatusCode,
@@ -30,6 +31,8 @@ pub struct ApiState {
     pub transport: Arc<UdpTransport>,
     pub lgpd_index: Arc<RwLock<LgpdIndex>>,
     pub rate_limiter: Arc<RateLimiter>,
+    pub provenance_nodes: Arc<RwLock<Vec<ProvenanceNode>>>,
+    pub derivation_index: Arc<RwLock<DerivationIndex>>,
 }
 
 #[derive(Serialize)]
@@ -421,24 +424,12 @@ async fn titular_anonymize(
 
                 let suppression = lgpd_rights::create_suppression_epa(&state.node_identity, epa);
 
-                // Graph blinding: cega links de proveniência que referenciam este EPA
-                let mut links_blinded = 0;
-                for other_epa in epas.iter_mut() {
-                    if other_epa.epa_id != epa_ref.epa_id {
-                        // TODO: when ProvenanceChain is stored alongside EPAs,
-                        // traverse and blind parent_hash references here.
-                        // For now, track the count.
-                        let _ = other_epa;
-                        let _ = &mut links_blinded;
-                    }
-                }
-
                 let result = AnonymizationResult {
                     original_epa_id: epa_ref.epa_id.clone(),
                     suppression_epa_id: suppression.epa_id.clone(),
                     fields_anonymized: fields,
                     timestamp: chrono::Utc::now(),
-                    links_blinded,
+                    links_blinded: 0, // updated below after prov lock
                 };
 
                 if epas.len() >= MAX_EPA_ENTRIES {
@@ -451,6 +442,49 @@ async fn titular_anonymize(
             }
         }
     } // epas lock dropped here
+
+    // Graph blinding: traversa ProvenanceNodes e cega links que referenciam os EPAs anonimizados
+    {
+        let mut prov_nodes = state.provenance_nodes.write().await;
+        let mut deriv_idx = state.derivation_index.write().await;
+
+        for r in &results {
+            let suppression_integrity = suppressions
+                .iter()
+                .find(|s| s.epa_id == r.suppression_epa_id)
+                .map(|s| s.integrity_hash.clone())
+                .unwrap_or_default();
+
+            // Blinda links diretos (filhos apontam pro pai anonimizado)
+            let blinded =
+                blind_derivation_links(&mut prov_nodes, &r.original_epa_id, &suppression_integrity);
+
+            // Remove entrada do pai anonimizado e rebuild index
+            deriv_idx.remove_parent(&r.original_epa_id);
+            *deriv_idx = DerivationIndex::build_from_chain_refs(&prov_nodes);
+
+            // Atualiza contagem no resultado (próxima iteração vai ver)
+            // Nota: não podemos mutar results aqui porque还在 borrow
+            // O links_blinded será atualizado abaixo
+            let _ = blinded;
+        }
+
+        // Agora atualiza links_blinded em cada resultado
+        for r in results.iter_mut() {
+            let suppression_integrity = suppressions
+                .iter()
+                .find(|s| s.epa_id == r.suppression_epa_id)
+                .map(|s| s.integrity_hash.clone())
+                .unwrap_or_default();
+
+            r.links_blinded = prov_nodes
+                .iter()
+                .filter(|n| {
+                    matches!(&n.parent_ref, Some(p) if p.is_blinded() && p.as_str().contains(&suppression_integrity))
+                })
+                .count();
+        }
+    }
 
     // Broadcast suppression EPAs (acquires peers lock - must come after epas lock)
     for suppression in &suppressions {
@@ -532,6 +566,8 @@ mod tests {
             transport,
             lgpd_index: Arc::new(RwLock::new(LgpdIndex::new())),
             rate_limiter: Arc::new(RateLimiter::new(100, std::time::Duration::from_secs(60))),
+            provenance_nodes: Arc::new(RwLock::new(Vec::new())),
+            derivation_index: Arc::new(RwLock::new(DerivationIndex::new())),
         }
     }
 

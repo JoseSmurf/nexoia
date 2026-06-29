@@ -91,6 +91,18 @@ impl DerivationIndex {
             .unwrap_or_default()
     }
 
+    pub fn remove_parent(&mut self, epa_id: &str) {
+        self.children.remove(epa_id);
+    }
+
+    pub fn len(&self) -> usize {
+        self.children.values().map(|v| v.len()).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.children.is_empty()
+    }
+
     pub fn build_from_chain_refs(nodes: &[ProvenanceNode]) -> Self {
         let mut index = Self::new();
         for node in nodes {

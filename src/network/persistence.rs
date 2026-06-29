@@ -1,5 +1,6 @@
 use crate::network::epa::SharedEPA;
 use crate::network::transport::{PeerList, TrustedPeer, TrustedPeerList};
+use crate::provenance::ProvenanceNode;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -10,6 +11,8 @@ pub struct PersistedData {
     pub peers: Vec<String>,
     pub epas: Vec<SharedEPA>,
     pub trusted_peers: Vec<PersistedTrustedPeer>,
+    #[serde(default)]
+    pub provenance_nodes: Vec<ProvenanceNode>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -82,6 +85,7 @@ pub fn load_data(path: &Path) -> Result<PersistedData, std::io::Error> {
         peers: valid_peers,
         trusted_peers: valid_trusted,
         epas: valid_epas,
+        provenance_nodes: persisted.provenance_nodes,
     })
 }
 
@@ -156,6 +160,7 @@ pub async fn save_network_state(
     peers: &Arc<RwLock<PeerList>>,
     epas: &Arc<RwLock<Vec<SharedEPA>>>,
     trusted_peers: &Arc<RwLock<TrustedPeerList>>,
+    provenance_nodes: &Arc<RwLock<Vec<ProvenanceNode>>>,
 ) {
     let peer_addrs = {
         let peer_list = peers.read().await;
@@ -169,11 +174,16 @@ pub async fn save_network_state(
         let trusted_list = trusted_peers.read().await;
         trusted_to_persisted(&trusted_list)
     };
+    let prov_nodes = {
+        let nodes = provenance_nodes.read().await;
+        nodes.clone()
+    };
 
     let data = PersistedData {
         peers: peer_addrs,
         epas: epa_list,
         trusted_peers: trusted_persisted,
+        provenance_nodes: prov_nodes,
     };
 
     if let Err(e) = save_data(data_path, &data) {

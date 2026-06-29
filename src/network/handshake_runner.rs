@@ -14,6 +14,7 @@ use crate::network::transport::{
     NetworkMessage, PeerList, PeerState, TrustedPeer, TrustedPeerList, UdpTransport,
 };
 use crate::network::verify::{verify_epa, VerifyResult};
+use crate::provenance::ProvenanceNode;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -37,6 +38,7 @@ pub async fn run_udp_listener(
     disable_encryption: bool,
     session_manager: Arc<SessionManager>,
     pending_handshakes: Arc<RwLock<HashMap<SocketAddr, PendingHandshake>>>,
+    provenance_nodes: Arc<RwLock<Vec<ProvenanceNode>>>,
 ) {
     loop {
         match transport.recv().await {
@@ -533,7 +535,14 @@ pub async fn run_udp_listener(
                                 node_id: node.node_id.clone(),
                             };
                             let _ = transport.send(&pong, peer_addr).await;
-                            save_network_state(&data_path, &peers, &epas, &trusted_peers).await;
+                            save_network_state(
+                                &data_path,
+                                &peers,
+                                &epas,
+                                &trusted_peers,
+                                &provenance_nodes,
+                            )
+                            .await;
                         }
                     }
                 }
@@ -716,6 +725,7 @@ pub async fn run_udp_listener(
                     let trusted_clone = Arc::clone(&trusted_peers);
                     let reputation_clone = Arc::clone(&reputation);
                     let data_path_clone = data_path.clone();
+                    let prov_clone = Arc::clone(&provenance_nodes);
 
                     tokio::spawn(async move {
                         verify_and_store_epa(
@@ -725,6 +735,7 @@ pub async fn run_udp_listener(
                             trusted_clone,
                             reputation_clone,
                             data_path_clone,
+                            prov_clone,
                         )
                         .await;
                     });
@@ -745,6 +756,7 @@ async fn verify_and_store_epa(
     trusted_peers: Arc<RwLock<TrustedPeerList>>,
     reputation: Arc<RwLock<ReputationStore>>,
     data_path: PathBuf,
+    provenance_nodes: Arc<RwLock<Vec<ProvenanceNode>>>,
 ) {
     let result = verify_epa(&epa);
 
@@ -765,7 +777,7 @@ async fn verify_and_store_epa(
                 epa_list.push(epa.clone());
             }
             println!("✓ Received valid EPA: {}", epa);
-            save_network_state(&data_path, &peers, &epas, &trusted_peers).await;
+            save_network_state(&data_path, &peers, &epas, &trusted_peers, &provenance_nodes).await;
         }
         VerifyResult::InvalidIntegrity => {
             eprintln!("✗ EPA integrity failed from {}", epa.node_id);

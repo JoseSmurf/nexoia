@@ -47,6 +47,7 @@ pub async fn run_pipeline(
     trusted_peers: &Arc<RwLock<TrustedPeerList>>,
     data_path: &Path,
     lgpd_index: Option<Arc<RwLock<crate::lgpd_rights::LgpdIndex>>>,
+    provenance_nodes: &Arc<RwLock<Vec<crate::provenance::ProvenanceNode>>>,
 ) -> Result<(), Box<dyn Error>> {
     let limiter = crate::defense::RateLimiter::new(100, Duration::from_secs(60));
     let engine = crate::ai::EvidenceEngine::new(0.30);
@@ -173,7 +174,7 @@ pub async fn run_pipeline(
         }
     }
 
-    persistence::save_network_state(data_path, peers, epas, trusted_peers).await;
+    persistence::save_network_state(data_path, peers, epas, trusted_peers, provenance_nodes).await;
 
     let peer_list = peers.read().await;
     if !peer_list.is_empty() {

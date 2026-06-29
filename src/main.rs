@@ -162,6 +162,7 @@ fn spawn_tasks(
     sm: &Arc<SessionManager>,
     pending: &Arc<RwLock<HashMap<SocketAddr, PendingHandshake>>>,
     udp_socket: Arc<UdpTransport>,
+    provenance_nodes: Arc<RwLock<Vec<crate::provenance::ProvenanceNode>>>,
     data_path: &std::path::Path,
     api_state: ApiState,
     api_addr: SocketAddr,
@@ -225,6 +226,7 @@ fn spawn_tasks(
         cfg.disable_encryption,
         Arc::clone(sm),
         Arc::clone(pending),
+        Arc::clone(&provenance_nodes),
     ));
     let ac = api_addr;
     let tls_cert = cfg.tls_cert.clone();
@@ -303,6 +305,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
             idx.subjects().len()
         );
     }
+
+    // Reconstrói ProvenanceChain a partir dos nós persistidos
+    let provenance_nodes: Arc<RwLock<Vec<crate::provenance::ProvenanceNode>>> =
+        Arc::new(RwLock::new(persisted.provenance_nodes));
+    let derivation_index: Arc<RwLock<crate::provenance::DerivationIndex>> = {
+        let nodes = provenance_nodes.read().await;
+        Arc::new(RwLock::new(
+            crate::provenance::DerivationIndex::build_from_chain_refs(&nodes),
+        ))
+    };
+    {
+        let nodes = provenance_nodes.read().await;
+        let idx = derivation_index.read().await;
+        println!(
+            "Provenance:   Loaded {} nodes ({} derivation links)",
+            nodes.len(),
+            idx.len()
+        );
+    }
     let mut rep_store = ReputationStore::with_path(cfg.data_dir.join("reputation.json"));
     match rep_store.load() {
         Ok(()) => {
@@ -354,6 +375,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             100,
             Duration::from_secs(60),
         )),
+        provenance_nodes: Arc::clone(&provenance_nodes),
+        derivation_index: Arc::clone(&derivation_index),
     };
     spawn_tasks(
         &node,
@@ -367,6 +390,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &sm,
         &pending,
         udp_socket,
+        Arc::clone(&provenance_nodes),
         &data_path,
         api_state,
         api_addr,
@@ -378,6 +402,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &trusted_peers,
         &data_path,
         Some(lgpd_index),
+        &provenance_nodes,
     )
     .await?;
     println!("\nNode running. Press Ctrl+C to stop.");
@@ -388,7 +413,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if let Err(e) = reputation.read().await.save() {
         eprintln!("Failed to save reputation: {}", e);
     }
-    persistence::save_network_state(&data_path, &peers, &epas, &trusted_peers).await;
+    persistence::save_network_state(&data_path, &peers, &epas, &trusted_peers, &provenance_nodes)
+        .await;
     println!("State saved. Goodbye!");
 
     Ok(())

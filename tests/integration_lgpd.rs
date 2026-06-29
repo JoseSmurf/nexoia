@@ -407,3 +407,195 @@ fn suppression_epa_has_correct_structure() {
     // EPA de supressão tem integrity_hash válido
     assert!(!suppression.integrity_hash.is_empty());
 }
+
+// ── Stress test: 100-node linear chain ─────────────────────────
+
+#[test]
+fn stress_100_node_linear_chain_blinding() {
+    let node = NodeIdentity::generate("chain_test_100");
+    let mut epas: Vec<SharedEPA> = Vec::new();
+    let mut nodes: Vec<ProvenanceNode> = Vec::new();
+
+    // Cria cadeia de 100 nós
+    for i in 0..100 {
+        let epa = create_derived_epa(&node, &format!("epa_{}", i));
+        let parent_ref = if i > 0 {
+            Some(ProvenanceRef::active(epas[i - 1].epa_id.clone()))
+        } else {
+            None
+        };
+        nodes.push(ProvenanceNode {
+            node_id: epa.epa_id.clone(),
+            parent_ref,
+            strength: nexoia::types::EvidenceStrength::Local,
+            depth: i as u32,
+        });
+        epas.push(epa);
+    }
+
+    let index = DerivationIndex::build_from_chain_refs(&nodes);
+    assert_eq!(index.len(), 99); // 99 links (100 nodes)
+
+    // Blinda o nó 50 (meio da cadeia)
+    let suppressed_hash = "suppressed_epa_hash";
+    let target_id = nodes[50].node_id.clone();
+    let blinded = blind_derivation_links(&mut nodes, &target_id, suppressed_hash);
+
+    // Verifica que apenas 1 link foi cegado (nó 51 aponta pro 50)
+    assert_eq!(blinded, 1);
+
+    // Verifica que link foi cegado
+    let node_51 = nodes.iter().find(|n| n.node_id == epas[51].epa_id).unwrap();
+    assert!(node_51.parent_ref.as_ref().unwrap().is_blinded());
+
+    // Verifica que outros links não foram afetados
+    let node_52 = nodes.iter().find(|n| n.node_id == epas[52].epa_id).unwrap();
+    assert!(!node_52.parent_ref.as_ref().unwrap().is_blinded());
+}
+
+// ── Stress test: 500-node linear chain ────────────────────────
+
+#[test]
+fn stress_500_node_linear_chain_blinding() {
+    let node = NodeIdentity::generate("chain_test_500");
+    let mut epas: Vec<SharedEPA> = Vec::new();
+    let mut nodes: Vec<ProvenanceNode> = Vec::new();
+
+    // Cria cadeia de 500 nós
+    for i in 0..500 {
+        let epa = create_derived_epa(&node, &format!("epa_{}", i));
+        let parent_ref = if i > 0 {
+            Some(ProvenanceRef::active(epas[i - 1].epa_id.clone()))
+        } else {
+            None
+        };
+        nodes.push(ProvenanceNode {
+            node_id: epa.epa_id.clone(),
+            parent_ref,
+            strength: nexoia::types::EvidenceStrength::Local,
+            depth: i as u32,
+        });
+        epas.push(epa);
+    }
+
+    let index = DerivationIndex::build_from_chain_refs(&nodes);
+    assert_eq!(index.len(), 499);
+
+    // Blinda o nó 250
+    let target_id = epas[250].epa_id.clone();
+    let blinded = blind_derivation_links(&mut nodes, &target_id, "suppressed_hash");
+
+    assert_eq!(blinded, 1);
+
+    // Verifica que apenas o filho direto foi cegado
+    let node_251 = nodes
+        .iter()
+        .find(|n| n.node_id == epas[251].epa_id)
+        .unwrap();
+    assert!(node_251.parent_ref.as_ref().unwrap().is_blinded());
+}
+
+// ── Stress test: branching tree (2 levels, 10 children each) ───
+
+#[test]
+fn stress_branching_tree_blinding() {
+    let node = NodeIdentity::generate("tree_test");
+    let mut epas: Vec<SharedEPA> = Vec::new();
+    let mut nodes: Vec<ProvenanceNode> = Vec::new();
+
+    // Root
+    let root = create_derived_epa(&node, "root");
+    nodes.push(ProvenanceNode {
+        node_id: root.epa_id.clone(),
+        parent_ref: None,
+        strength: nexoia::types::EvidenceStrength::Local,
+        depth: 0,
+    });
+    epas.push(root);
+
+    // 10 filhos do root
+    let mut children: Vec<SharedEPA> = Vec::new();
+    for i in 0..10 {
+        let child = create_derived_epa(&node, &format!("child_{}", i));
+        children.push(child.clone());
+        nodes.push(ProvenanceNode {
+            node_id: child.epa_id.clone(),
+            parent_ref: Some(ProvenanceRef::active(epas[0].epa_id.clone())),
+            strength: nexoia::types::EvidenceStrength::Local,
+            depth: 1,
+        });
+        epas.push(child);
+    }
+
+    // Cada filho tem 10 filhos (netos)
+    for child in &children {
+        for j in 0..10 {
+            let grandchild =
+                create_derived_epa(&node, &format!("grandchild_{}_{}", child.epa_id, j));
+            epas.push(grandchild.clone());
+            nodes.push(ProvenanceNode {
+                node_id: grandchild.epa_id.clone(),
+                parent_ref: Some(ProvenanceRef::active(child.epa_id.clone())),
+                strength: nexoia::types::EvidenceStrength::Local,
+                depth: 2,
+            });
+        }
+    }
+
+    let index = DerivationIndex::build_from_chain_refs(&nodes);
+    // 10 filhos + 100 netos = 110 links
+    assert_eq!(index.len(), 110);
+
+    // Blinda um filho do root
+    let target_id = children[0].epa_id.clone();
+    let blinded = blind_derivation_links(&mut nodes, &target_id, "suppressed_hash");
+
+    // Apenas o filho direto e seus 10 filhos devem ser cegados (11 links)
+    // Wait - actually only direct children point to this node
+    // The grandchildren point to the child, not the root
+    assert_eq!(blinded, 10); // 10 filhos diretos
+
+    // Verifica que netos do filho cegado não foram afetados (apontam pro filho, não pro root)
+    let grandchildren_of_blinded = index.children_of(&children[0].epa_id);
+    assert_eq!(grandchildren_of_blinded.len(), 10);
+}
+
+// ── Stress test: 1000 EPAs with random derivation ─────────────
+
+#[test]
+fn stress_1000_epas_random_derivation_blinding() {
+    let node = NodeIdentity::generate("random_test_1000");
+    let mut epas: Vec<SharedEPA> = Vec::new();
+    let mut nodes: Vec<ProvenanceNode> = Vec::new();
+
+    // Cria 1000 EPAs com derivação aleatória
+    for i in 0..1000 {
+        let epa = create_derived_epa(&node, &format!("epa_{}", i));
+        let parent_ref = if i > 0 && i % 7 != 0 {
+            // 85% chance de ter parent
+            let parent_idx = rand::random::<usize>() % i;
+            Some(ProvenanceRef::active(epas[parent_idx].epa_id.clone()))
+        } else {
+            None
+        };
+        nodes.push(ProvenanceNode {
+            node_id: epa.epa_id.clone(),
+            parent_ref,
+            strength: nexoia::types::EvidenceStrength::Local,
+            depth: (i % 10) as u32,
+        });
+        epas.push(epa);
+    }
+
+    // Blinda um nó aleatório no meio
+    let target_id = epas[500].epa_id.clone();
+
+    // Build index BEFORE blinding to get expected children count
+    let index_before = DerivationIndex::build_from_chain_refs(&nodes);
+    let expected_children = index_before.children_of(&epas[500].epa_id).len();
+
+    let blinded = blind_derivation_links(&mut nodes, &target_id, "suppressed_hash");
+
+    // Verify blinded count matches expected children
+    assert_eq!(blinded, expected_children);
+}

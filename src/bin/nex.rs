@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_imports)]
+#![allow(dead_code, unused_imports, clippy::upper_case_acronyms)]
 
 #[path = "../defense.rs"]
 mod defense;

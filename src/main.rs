@@ -1,5 +1,8 @@
 // NexoIA — Main entry point
 // Lock order: see GLOBAL LOCK ORDER comment below
+#![allow(dead_code, unused_imports)]
+#![allow(clippy::upper_case_acronyms)]
+#![allow(clippy::too_many_arguments)]
 
 mod ai;
 mod decision;

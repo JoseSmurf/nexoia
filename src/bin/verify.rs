@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_imports)]
+#![allow(dead_code, unused_imports, clippy::upper_case_acronyms)]
 
 #[path = "../decision.rs"]
 mod decision;
@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     })?;
 
     let report = verify_core::run(root)
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+        .map_err(|err| io::Error::other(err.to_string()))?;
     let output = serde_json::to_string_pretty(&report)?;
     println!("{output}");
 

@@ -4,13 +4,13 @@ use nexoia::network::secure_transport::generate_handshake_nonce;
 use nexoia::network::transport::{NetworkMessage, PeerState, TrustedPeerList, UdpTransport};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
 
 /// Nó simplificado para testes
 struct TestNode {
     identity: NodeIdentity,
     transport: UdpTransport,
+    #[allow(dead_code)]
     trusted_peers: Arc<RwLock<TrustedPeerList>>,
 }
 
@@ -87,13 +87,13 @@ async fn test_three_nodes_send_hello() {
 #[tokio::test]
 async fn test_handshake_challenge_response_flow() {
     // Arrange
-    let node_a = TestNode::new("alpha", 18200).await;
+    let _node_a = TestNode::new("alpha", 18200).await;
     let node_b = TestNode::new("beta", 18201).await;
 
     // Act: Node A cria challenge
     let challenge_hash = "abc123";
     let timestamp = chrono::Utc::now().to_rfc3339();
-    let challenge = NetworkMessage::Challenge {
+    let _challenge = NetworkMessage::Challenge {
         challenge_hash: challenge_hash.to_string(),
         timestamp: timestamp.clone(),
     };

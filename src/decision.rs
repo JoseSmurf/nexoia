@@ -135,12 +135,10 @@ fn classify_auto(state: &State) -> (DecisionStatus, String, String) {
     let margin = input_value - state.threshold;
     let margin_pct = if state.threshold != 0 {
         (margin as f64 / state.threshold as f64) * 100.0
+    } else if input_value > 0 {
+        100.0
     } else {
-        if input_value > 0 {
-            100.0
-        } else {
-            0.0
-        }
+        0.0
     };
 
     if margin >= 0 {

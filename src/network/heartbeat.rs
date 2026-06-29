@@ -44,15 +44,19 @@ pub async fn run_heartbeat_sender(
             }
         };
 
-        // Envia heartbeat para todos os peers
+        // Envia heartbeat para todos os peers (com length-prefix framing)
         let heartbeat = NetworkMessage::Heartbeat {
             node_id: node.node_id.clone(),
             timestamp: chrono::Utc::now().to_rfc3339(),
         };
 
         if let Ok(data) = serde_json::to_vec(&heartbeat) {
+            let len = data.len() as u32;
+            let mut framed = Vec::with_capacity(4 + data.len());
+            framed.extend_from_slice(&len.to_be_bytes());
+            framed.extend_from_slice(&data);
             for addr in &addrs {
-                let _ = socket.send_to(&data, addr).await;
+                let _ = socket.send_to(&framed, addr).await;
             }
         }
 
@@ -71,8 +75,12 @@ pub async fn run_heartbeat_sender(
                     peers: peer_addrs,
                 };
                 if let Ok(data) = serde_json::to_vec(&exchange) {
+                    let len = data.len() as u32;
+                    let mut framed = Vec::with_capacity(4 + data.len());
+                    framed.extend_from_slice(&len.to_be_bytes());
+                    framed.extend_from_slice(&data);
                     for addr in &addrs {
-                        let _ = socket.send_to(&data, addr).await;
+                        let _ = socket.send_to(&framed, addr).await;
                     }
                 }
             }

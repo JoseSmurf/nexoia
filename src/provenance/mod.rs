@@ -1,6 +1,7 @@
 pub mod aggregator;
 pub mod compose;
 pub mod typed_node;
+pub mod verify;
 pub mod witness;
 
 #[allow(unused_imports)]

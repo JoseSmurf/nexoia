@@ -1,5 +1,4 @@
 use crate::network::epa::{SharedEPA, VerifyError};
-use crate::network::identity;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -37,11 +36,6 @@ pub fn verify_epa(epa: &SharedEPA) -> VerifyResult {
         Err(VerifyError::TimestampInvalid) => VerifyResult::InvalidIntegrity,
         Err(VerifyError::MissingPublicKey) => VerifyResult::InvalidSignature,
     }
-}
-
-/// Verifica apenas a assinatura Ed25519 (para testes).
-pub fn verify_signature_only(public_key_hex: &str, data: &[u8], signature: &[u8]) -> bool {
-    identity::verify_signature(public_key_hex, data, signature).unwrap_or(false)
 }
 
 #[cfg(test)]

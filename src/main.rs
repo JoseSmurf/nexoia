@@ -400,6 +400,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )),
         provenance_nodes: Arc::clone(&provenance_nodes),
         derivation_index: Arc::clone(&derivation_index),
+        data_dir: cfg.data_dir.clone(),
+        witness_store: Arc::new(RwLock::new(std::collections::HashMap::new())),
     };
     let ctx = NodeContext {
         node,
@@ -427,6 +429,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &ctx.data_path,
         Some(lgpd_index),
         &ctx.provenance_nodes,
+        Some(&ctx.data_path),
     )
     .await?;
     println!("\nNode running. Press Ctrl+C to stop.");
@@ -445,6 +448,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &ctx.provenance_nodes,
     )
     .await;
+
+    // Save checkpoint with reactive rules
+    {
+        let checkpoint_dir = ctx.cfg.data_dir.join("checkpoints");
+        let manager = crate::nex::checkpoint::CheckpointManager::new(checkpoint_dir);
+        let network_data = persistence::load_data(&ctx.data_path).unwrap_or_default();
+        let checkpoint =
+            crate::nex::checkpoint::create_checkpoint(&ctx.node.node_id, &network_data, &[]);
+        if let Err(e) = manager.save(&checkpoint) {
+            eprintln!("Failed to save checkpoint: {}", e);
+        } else {
+            println!("Checkpoint saved.");
+        }
+    }
+
     println!("State saved. Goodbye!");
 
     Ok(())

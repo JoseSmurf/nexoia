@@ -1,7 +1,11 @@
 #![allow(dead_code, unused_imports, clippy::upper_case_acronyms)]
 
+#[path = "../decision.rs"]
+mod decision;
 #[path = "../defense.rs"]
 mod defense;
+#[path = "../evidence.rs"]
+mod evidence;
 #[path = "../hash.rs"]
 mod hash;
 #[path = "../lgpd.rs"]
@@ -18,6 +22,8 @@ mod nex;
 mod provenance;
 #[path = "../quality.rs"]
 mod quality;
+#[path = "../state.rs"]
+mod state;
 #[path = "../types.rs"]
 mod types;
 

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::decision::DecisionStatus;
 use crate::evidence::{EvidenceKind, EvidenceRecord};
 use crate::hash::canonical_hash;

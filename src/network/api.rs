@@ -33,6 +33,9 @@ pub struct ApiState {
     pub rate_limiter: Arc<RateLimiter>,
     pub provenance_nodes: Arc<RwLock<Vec<ProvenanceNode>>>,
     pub derivation_index: Arc<RwLock<DerivationIndex>>,
+    pub data_dir: std::path::PathBuf,
+    pub witness_store:
+        Arc<RwLock<std::collections::HashMap<String, crate::provenance::witness::WitnessSet>>>,
 }
 
 #[derive(Serialize)]
@@ -62,6 +65,20 @@ pub struct EncryptedEpaRequest {
     pub recipient_public_key: String,
 }
 
+#[derive(Deserialize)]
+pub struct WitnessRequest {
+    pub witness_id: String,
+    pub kind: String,
+}
+
+#[derive(Serialize)]
+pub struct WitnessResponse {
+    pub epa_id: String,
+    pub witness_count: usize,
+    pub attested: bool,
+    pub message: String,
+}
+
 #[derive(Serialize)]
 pub struct ComplianceReport {
     pub epa_id: String,
@@ -69,6 +86,8 @@ pub struct ComplianceReport {
     pub derivation_chain: Vec<ChainLink>,
     pub provenance_integrity: bool,
     pub lgpd_metadata_present: bool,
+    pub witness_count: usize,
+    pub attested: bool,
 }
 
 #[derive(Serialize)]
@@ -315,12 +334,23 @@ async fn get_compliance(
         None => (BlindingStatus::NotBlinded, Vec::new()),
     };
 
+    let (witness_count, attested) = {
+        let witnesses = state.witness_store.read().await;
+        if let Some(ws) = witnesses.get(&epa_id) {
+            (ws.len(), ws.len() >= 2)
+        } else {
+            (0, false)
+        }
+    };
+
     Ok(Json(ComplianceReport {
         epa_id,
         blinding_status,
         derivation_chain,
         provenance_integrity: true,
         lgpd_metadata_present: lgpd_present,
+        witness_count: witness_count,
+        attested: attested,
     }))
 }
 
@@ -630,6 +660,65 @@ async fn titular_revoke(
     Ok(Json(results))
 }
 
+/// GET /verify-chain — verificação de cadeia de provenance.
+/// Lê artifacts do data_dir e verifica integridade da cadeia.
+async fn verify_chain_endpoint(
+    State(state): State<ApiState>,
+) -> Result<Json<crate::provenance::verify::VerifyReport>, StatusCode> {
+    let report = crate::provenance::verify::run(&state.data_dir).map_err(|e| {
+        eprintln!("Chain verification failed: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(Json(report))
+}
+
+/// POST /epa/:id/witness — adiciona testemunha externa a um EPA.
+async fn witness_epa_endpoint(
+    State(state): State<ApiState>,
+    axum::extract::Path(epa_id): axum::extract::Path<String>,
+    Json(req): Json<WitnessRequest>,
+) -> Result<Json<WitnessResponse>, StatusCode> {
+    let epas = state.epas.read().await;
+    if !epas.iter().any(|e| e.epa_id == epa_id) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    drop(epas);
+
+    let kind = match req.kind.as_str() {
+        "cosigned" => crate::provenance::witness::WitnessKind::Cosigned,
+        "timestamped" => crate::provenance::witness::WitnessKind::TimestampedByTrustedSource,
+        "external_ledger" => {
+            crate::provenance::witness::WitnessKind::CrossReferencedInExternalLedger
+        }
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    let witness = crate::provenance::witness::Witness {
+        witness_id: uuid::Uuid::parse_str(&req.witness_id).map_err(|_| StatusCode::BAD_REQUEST)?,
+        witnessed_at_utc: chrono::Utc::now(),
+        kind,
+    };
+
+    let mut store = state.witness_store.write().await;
+    let ws = store
+        .entry(epa_id.clone())
+        .or_insert_with(crate::provenance::witness::WitnessSet::new);
+    ws.add(witness);
+    let count = ws.len();
+    let attested = count >= 2;
+
+    Ok(Json(WitnessResponse {
+        epa_id,
+        witness_count: count,
+        attested,
+        message: if attested {
+            "EPA attested by sufficient witnesses".to_string()
+        } else {
+            format!("{} witness(es) recorded, need 2+ for attestation", count)
+        },
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -656,6 +745,8 @@ mod tests {
             rate_limiter: Arc::new(RateLimiter::new(100, std::time::Duration::from_secs(60))),
             provenance_nodes: Arc::new(RwLock::new(Vec::new())),
             derivation_index: Arc::new(RwLock::new(DerivationIndex::new())),
+            data_dir: std::env::temp_dir(),
+            witness_store: Arc::new(RwLock::new(std::collections::HashMap::new())),
         }
     }
 
@@ -672,6 +763,8 @@ mod tests {
             .route("/titular/:hash/export", get(titular_export))
             .route("/titular/:hash", delete(titular_anonymize))
             .route("/titular/:hash/revogar", post(titular_revoke))
+            .route("/verify-chain", get(verify_chain_endpoint))
+            .route("/epa/:id/witness", post(witness_epa_endpoint))
             .with_state(state)
     }
 

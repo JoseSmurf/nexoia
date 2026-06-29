@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::provenance::{Anchored, Signed, TypedNode};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

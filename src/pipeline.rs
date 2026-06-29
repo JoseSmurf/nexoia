@@ -48,6 +48,7 @@ pub async fn run_pipeline(
     data_path: &Path,
     lgpd_index: Option<Arc<RwLock<crate::lgpd_rights::LgpdIndex>>>,
     provenance_nodes: &Arc<RwLock<Vec<crate::provenance::ProvenanceNode>>>,
+    artifacts_dir: Option<&Path>,
 ) -> Result<(), Box<dyn Error>> {
     let limiter = crate::defense::RateLimiter::new(100, Duration::from_secs(60));
     let engine = crate::ai::EvidenceEngine::new(0.30);
@@ -127,21 +128,22 @@ pub async fn run_pipeline(
         crate::types::EvidenceStrength::Unverifiable => "local",
     };
 
-    write_text("state.json", &state_json)?;
+    let out_dir = artifacts_dir.unwrap_or(Path::new("."));
+    write_text(out_dir.join("state.json"), &state_json)?;
     let state_hash = canonical_hash(&state_json);
 
     let decision = crate::decision::evaluate(&state, state_hash.clone(), kind, "local")?;
     let evidence_records = crate::evidence::build_records(&state, &decision)?;
 
     let evidence_jsonl = write_jsonl_string(&evidence_records)?;
-    write_text("evidence.jsonl", &evidence_jsonl)?;
+    write_text(out_dir.join("evidence.jsonl"), &evidence_jsonl)?;
 
     let decisions_jsonl = write_jsonl_string(std::slice::from_ref(&decision))?;
-    write_text("decisions.jsonl", &decisions_jsonl)?;
+    write_text(out_dir.join("decisions.jsonl"), &decisions_jsonl)?;
 
     let report = crate::explain::explain_chain(std::slice::from_ref(&decision));
     let explain_json = serde_json::to_string_pretty(&report)?;
-    write_text("explain.json", &explain_json)?;
+    write_text(out_dir.join("explain.json"), &explain_json)?;
     println!("{}", report.summary);
 
     let manifest = build_manifest(
@@ -152,7 +154,7 @@ pub async fn run_pipeline(
         &decisions_jsonl,
     );
     let manifest_json = serde_json::to_string_pretty(&manifest)?;
-    write_text("manifest.json", &manifest_json)?;
+    write_text(out_dir.join("manifest.json"), &manifest_json)?;
 
     println!("{}", decision.body.status);
     println!("{}", decision.body.reason_code);
@@ -298,6 +300,9 @@ pub fn build_manifest(
 }
 
 fn write_text(path: impl AsRef<Path>, contents: &str) -> Result<(), Box<dyn Error>> {
+    if let Some(parent) = path.as_ref().parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(path, contents)?;
     Ok(())
 }

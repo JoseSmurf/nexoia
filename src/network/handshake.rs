@@ -161,5 +161,95 @@ mod tests {
         let addr: SocketAddr = "127.0.0.1:9001".parse().unwrap();
         let hs = PendingHandshake::new_responder(addr, [2u8; 32]);
         assert_eq!(hs.phase, HandshakePhase::HelloReceived);
+        assert_eq!(hs.remote_addr, addr);
+        assert_eq!(hs.local_nonce, [2u8; 32]);
+        assert!(hs.remote_node_id.is_none());
+        assert!(hs.ephemeral_secret.is_some());
+        assert!(hs.ephemeral_public.is_some());
+    }
+
+    #[test]
+    fn pending_handshake_initiator() {
+        let addr: SocketAddr = "127.0.0.1:9002".parse().unwrap();
+        let secret = EphemeralSecret::random_from_rng(rand::rngs::OsRng);
+        let hs = PendingHandshake::new_initiator(addr, [3u8; 32], secret);
+        assert_eq!(hs.phase, HandshakePhase::HelloReceived);
+        assert_eq!(hs.remote_addr, addr);
+        assert_eq!(hs.local_nonce, [3u8; 32]);
+        assert!(hs.ephemeral_secret.is_some());
+        assert!(hs.ephemeral_public.is_some());
+    }
+
+    #[test]
+    fn handshake_not_expired_initially() {
+        let addr: SocketAddr = "127.0.0.1:9003".parse().unwrap();
+        let hs = PendingHandshake::new_responder(addr, [1u8; 32]);
+        assert!(!hs.is_expired(std::time::Duration::from_secs(300)));
+    }
+
+    #[test]
+    fn handshake_expires_after_timeout() {
+        let addr: SocketAddr = "127.0.0.1:9004".parse().unwrap();
+        let mut hs = PendingHandshake::new_responder(addr, [1u8; 32]);
+        // Simula expiração forçando created_at para o passado
+        hs.created_at = std::time::Instant::now() - std::time::Duration::from_secs(400);
+        assert!(hs.is_expired(std::time::Duration::from_secs(300)));
+    }
+
+    #[test]
+    fn handshake_phase_transitions() {
+        let addr: SocketAddr = "127.0.0.1:9005".parse().unwrap();
+        let mut hs = PendingHandshake::new_responder(addr, [1u8; 32]);
+
+        assert_eq!(hs.phase, HandshakePhase::HelloReceived);
+
+        hs.phase = HandshakePhase::ChallengeSent;
+        assert_eq!(hs.phase, HandshakePhase::ChallengeSent);
+
+        hs.phase = HandshakePhase::ResponseReceived;
+        assert_eq!(hs.phase, HandshakePhase::ResponseReceived);
+
+        hs.phase = HandshakePhase::Complete;
+        assert_eq!(hs.phase, HandshakePhase::Complete);
+    }
+
+    #[test]
+    fn handshake_failed_phase_carries_reason() {
+        let phase = HandshakePhase::Failed("invalid signature".to_string());
+        assert_eq!(
+            phase,
+            HandshakePhase::Failed("invalid signature".to_string())
+        );
+    }
+
+    #[test]
+    fn handshake_debug_redacts_ephemeral_secret() {
+        let addr: SocketAddr = "127.0.0.1:9006".parse().unwrap();
+        let hs = PendingHandshake::new_responder(addr, [1u8; 32]);
+        let debug_str = format!("{:?}", hs);
+        assert!(
+            debug_str.contains("[redacted]"),
+            "Debug should redact ephemeral_secret"
+        );
+        assert!(
+            !debug_str.contains("ephemeral_secret: EphemeralSecret"),
+            "Debug should not expose raw secret"
+        );
+    }
+
+    #[test]
+    fn handshake_remote_fields_initially_none() {
+        let addr: SocketAddr = "127.0.0.1:9007".parse().unwrap();
+        let hs = PendingHandshake::new_responder(addr, [1u8; 32]);
+        assert!(hs.remote_node_id.is_none());
+        assert!(hs.remote_ed25519_pubkey.is_none());
+        assert!(hs.remote_x25519_pubkey.is_none());
+        assert!(hs.remote_ml_kem_ek.is_none());
+        assert!(hs.remote_nonce.is_none());
+        assert!(hs.challenge_hash.is_none());
+        assert!(hs.challenge_timestamp.is_none());
+        assert!(hs.ml_kem_ciphertext.is_none());
+        assert!(hs.ml_kem_shared.is_none());
+        assert!(hs.session_key.is_none());
     }
 }

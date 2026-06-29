@@ -113,23 +113,135 @@ fn classify(state: &State) -> (DecisionStatus, String, String) {
             "SCENARIO_ABSTERSE".to_string(),
             "scenario override requested an ABSTERSE result".to_string(),
         ),
-        Scenario::Auto => match state.input_value {
-            None => (
+        Scenario::Auto => classify_auto(state),
+    }
+}
+
+fn classify_auto(state: &State) -> (DecisionStatus, String, String) {
+    let input_value = match state.input_value {
+        None => {
+            return (
                 DecisionStatus::Absterse,
                 "MISSING_INPUT_VALUE".to_string(),
                 "no input_value was provided, so the system abstains".to_string(),
-            ),
-            Some(value) if value >= state.threshold => (
+            );
+        }
+        Some(v) => v,
+    };
+
+    let mut score = DecisionScore::new();
+
+    // Fator 1: Threshold comparison (peso principal)
+    let margin = input_value - state.threshold;
+    let margin_pct = if state.threshold != 0 {
+        (margin as f64 / state.threshold as f64) * 100.0
+    } else {
+        if input_value > 0 { 100.0 } else { 0.0 }
+    };
+
+    if margin >= 0 {
+        // Base 25 (suficiente para OK) + bônus proporcional
+        let bonus = (margin_pct / 10.0).min(10.0);
+        score.add_positive(25.0 + bonus, format!(
+            "input_value {input_value} meets threshold {} (margin: {margin}, {margin_pct:.1}%)",
+            state.threshold
+        ));
+    } else {
+        score.add_negative(margin_pct.abs().min(100.0), format!(
+            "input_value {input_value} below threshold {} (deficit: {margin}, {margin_pct:.1}%)",
+            state.threshold
+        ));
+    }
+
+    // Fator 2: LGPD compliance
+    if let Some(ref lgpd) = state.lgpd {
+        match lgpd.validate() {
+            Ok(()) => {
+                score.add_positive(15.0, "LGPD metadata is valid".to_string());
+                if lgpd.data_subject_hash.is_some() {
+                    score.add_positive(5.0, "data subject identified".to_string());
+                }
+                if lgpd.consent_id.is_some() {
+                    score.add_positive(5.0, "consent documented".to_string());
+                }
+            }
+            Err(e) => {
+                score.add_negative(20.0, format!("LGPD metadata invalid: {}", e));
+            }
+        }
+    }
+
+    // Fator 3: Threshold quality (threshold muito baixo = suspeito)
+    if state.threshold <= 0 {
+        score.add_negative(10.0, "threshold is zero or negative".to_string());
+    }
+
+    score.resolve()
+}
+
+/// Score multifator para decisões.
+struct DecisionScore {
+    positive: f64,
+    negative: f64,
+    positive_reasons: Vec<String>,
+    negative_reasons: Vec<String>,
+}
+
+impl DecisionScore {
+    fn new() -> Self {
+        Self {
+            positive: 0.0,
+            negative: 0.0,
+            positive_reasons: Vec::new(),
+            negative_reasons: Vec::new(),
+        }
+    }
+
+    fn add_positive(&mut self, weight: f64, reason: String) {
+        self.positive += weight;
+        self.positive_reasons.push(reason);
+    }
+
+    fn add_negative(&mut self, weight: f64, reason: String) {
+        self.negative += weight;
+        self.negative_reasons.push(reason);
+    }
+
+    fn resolve(self) -> (DecisionStatus, String, String) {
+        let net = self.positive - self.negative;
+
+        // Thresholds calibrados:
+        //   OK       >= 25  (threshold met + optional LGPD boost)
+        //   Violacao <= -10 (threshold breach or critical LGPD failure)
+        //   Absterse       (inconclusive / borderline)
+        if net >= 25.0 {
+            let reasons = self.positive_reasons.join("; ");
+            (
                 DecisionStatus::Ok,
-                "THRESHOLD_MET".to_string(),
-                format!("input_value {value} met threshold {}", state.threshold),
-            ),
-            Some(value) => (
+                "MULTIFACTOR_OK".to_string(),
+                format!("decision score {net:.1} (positive: {reasons})"),
+            )
+        } else if net <= -10.0 {
+            let reasons = self.negative_reasons.join("; ");
+            (
                 DecisionStatus::Violacao,
-                "THRESHOLD_BREACH".to_string(),
-                format!("input_value {value} is below threshold {}", state.threshold),
-            ),
-        },
+                "MULTIFACTOR_VIOLACAO".to_string(),
+                format!("decision score {net:.1} (negative: {reasons})"),
+            )
+        } else {
+            let all = self
+                .positive_reasons
+                .iter()
+                .chain(self.negative_reasons.iter())
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("; ");
+            (
+                DecisionStatus::Absterse,
+                "MULTIFACTOR_INCONCLUSIVE".to_string(),
+                format!("decision score {net:.1} — inconclusive ({all})"),
+            )
+        }
     }
 }
 
@@ -158,7 +270,7 @@ mod tests {
         let state = sample_state(Scenario::Auto, Some(60));
         let (status, reason_code, _) = classify(&state);
         assert_eq!(status, DecisionStatus::Ok);
-        assert_eq!(reason_code, "THRESHOLD_MET");
+        assert_eq!(reason_code, "MULTIFACTOR_OK");
     }
 
     #[test]
@@ -166,7 +278,7 @@ mod tests {
         let state = sample_state(Scenario::Auto, Some(10));
         let (status, reason_code, _) = classify(&state);
         assert_eq!(status, DecisionStatus::Violacao);
-        assert_eq!(reason_code, "THRESHOLD_BREACH");
+        assert_eq!(reason_code, "MULTIFACTOR_VIOLACAO");
     }
 
     #[test]
@@ -227,5 +339,73 @@ mod tests {
             decision.body.quality_right_strength,
             crate::types::EvidenceStrength::Signed
         );
+    }
+
+    #[test]
+    fn classify_auto_multifactor_ok() {
+        let mut state = sample_state(Scenario::Auto, Some(80));
+        state.threshold = 50;
+        let (status, reason_code, _) = classify(&state);
+        assert_eq!(status, DecisionStatus::Ok);
+        assert_eq!(reason_code, "MULTIFACTOR_OK");
+    }
+
+    #[test]
+    fn classify_auto_multifactor_violacao() {
+        let mut state = sample_state(Scenario::Auto, Some(10));
+        state.threshold = 50;
+        let (status, reason_code, _) = classify(&state);
+        assert_eq!(status, DecisionStatus::Violacao);
+        assert_eq!(reason_code, "MULTIFACTOR_VIOLACAO");
+    }
+
+    #[test]
+    fn classify_auto_with_lgpd_boosts_score() {
+        let mut state = sample_state(Scenario::Auto, Some(55));
+        state.threshold = 50;
+        state.lgpd = Some(crate::lgpd::LgpdMetadata {
+            lawful_basis: crate::lgpd::LawfulBasis::Consentimento,
+            purpose: "processamento de pedidos".to_string(),
+            retention_days: 365,
+            data_subject_hash: Some("hash123".to_string()),
+            consent_id: Some("consent_001".to_string()),
+            dpia_ref: None,
+        });
+        let (status, _, _) = classify(&state);
+        assert_eq!(status, DecisionStatus::Ok);
+    }
+
+    #[test]
+    fn classify_auto_invalid_lgpd_hurts_score() {
+        let mut state = sample_state(Scenario::Auto, Some(55));
+        state.threshold = 50;
+        state.lgpd = Some(crate::lgpd::LgpdMetadata {
+            lawful_basis: crate::lgpd::LawfulBasis::Consentimento,
+            purpose: "".to_string(),
+            retention_days: 0,
+            data_subject_hash: None,
+            consent_id: None,
+            dpia_ref: None,
+        });
+        let (status, reason_code, _) = classify(&state);
+        assert_eq!(status, DecisionStatus::Absterse);
+        assert_eq!(reason_code, "MULTIFACTOR_INCONCLUSIVE");
+    }
+
+    #[test]
+    fn classify_auto_borderline_with_lgpd_can_tip_to_ok() {
+        let mut state = sample_state(Scenario::Auto, Some(53));
+        state.threshold = 50;
+        state.lgpd = Some(crate::lgpd::LgpdMetadata {
+            lawful_basis: crate::lgpd::LawfulBasis::Contrato,
+            purpose: "execucao de contrato comercial".to_string(),
+            retention_days: 730,
+            data_subject_hash: Some("hash456".to_string()),
+            consent_id: None,
+            dpia_ref: None,
+        });
+        // margin=3, margin_pct=6% → score 6 + 15 + 5 = 26 >= 25 → OK
+        let (status, _, _) = classify(&state);
+        assert_eq!(status, DecisionStatus::Ok);
     }
 }

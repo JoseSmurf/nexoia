@@ -436,4 +436,165 @@ mod tests {
         assert!(list.contains(&addr1));
         assert!(list.contains(&addr2));
     }
+
+    #[test]
+    fn trusted_peer_list_evicts_oldest() {
+        let mut list = TrustedPeerList::new(2);
+        let addr1: SocketAddr = "127.0.0.1:9001".parse().unwrap();
+        let addr2: SocketAddr = "127.0.0.1:9002".parse().unwrap();
+        let addr3: SocketAddr = "127.0.0.1:9003".parse().unwrap();
+
+        let peer1 = TrustedPeer {
+            node_id: "node_a".to_string(),
+            public_key: "key_a".to_string(),
+            encryption_public_key: [1u8; 32],
+            addr: addr1,
+            authenticated_at: chrono::Utc::now() - chrono::Duration::hours(1),
+        };
+        let peer2 = TrustedPeer {
+            node_id: "node_b".to_string(),
+            public_key: "key_b".to_string(),
+            encryption_public_key: [2u8; 32],
+            addr: addr2,
+            authenticated_at: chrono::Utc::now(),
+        };
+        let peer3 = TrustedPeer {
+            node_id: "node_c".to_string(),
+            public_key: "key_c".to_string(),
+            encryption_public_key: [3u8; 32],
+            addr: addr3,
+            authenticated_at: chrono::Utc::now(),
+        };
+
+        assert!(list.add(peer1));
+        assert!(list.add(peer2));
+        assert!(list.add(peer3)); // evicts peer1 (oldest)
+        assert_eq!(list.len(), 2);
+        assert!(!list.contains(&addr1));
+        assert!(list.contains(&addr2));
+        assert!(list.contains(&addr3));
+    }
+
+    #[test]
+    fn trusted_peer_list_remove() {
+        let mut list = TrustedPeerList::new(5);
+        let addr: SocketAddr = "127.0.0.1:9001".parse().unwrap();
+        let peer = TrustedPeer {
+            node_id: "node_a".to_string(),
+            public_key: "key_a".to_string(),
+            encryption_public_key: [1u8; 32],
+            addr,
+            authenticated_at: chrono::Utc::now(),
+        };
+        assert!(list.add(peer));
+        assert!(list.remove(&addr));
+        assert!(!list.contains(&addr));
+        assert!(!list.remove(&addr)); // removing again returns false
+    }
+
+    #[test]
+    fn trusted_peer_list_peers_and_addrs() {
+        let mut list = TrustedPeerList::new(5);
+        let addr1: SocketAddr = "127.0.0.1:9001".parse().unwrap();
+        let addr2: SocketAddr = "127.0.0.1:9002".parse().unwrap();
+
+        list.add(TrustedPeer {
+            node_id: "a".to_string(),
+            public_key: "k".to_string(),
+            encryption_public_key: [1u8; 32],
+            addr: addr1,
+            authenticated_at: chrono::Utc::now(),
+        });
+        list.add(TrustedPeer {
+            node_id: "b".to_string(),
+            public_key: "k".to_string(),
+            encryption_public_key: [2u8; 32],
+            addr: addr2,
+            authenticated_at: chrono::Utc::now(),
+        });
+
+        assert_eq!(list.peers().len(), 2);
+        assert_eq!(list.addrs().len(), 2);
+    }
+
+    // ── PeerState tests (heartbeat) ─────────────────────────
+
+    #[test]
+    fn peer_state_new_has_no_misses() {
+        let state = PeerState::new();
+        assert_eq!(state.consecutive_misses, 0);
+        assert!(state.heartbeat_window.is_empty());
+    }
+
+    #[test]
+    fn peer_state_record_heartbeat_resets_misses() {
+        let mut state = PeerState::new();
+        state.consecutive_misses = 5;
+        state.record_heartbeat();
+        assert_eq!(state.consecutive_misses, 0);
+    }
+
+    #[test]
+    fn peer_state_record_miss_increments() {
+        let mut state = PeerState::new();
+        state.record_miss();
+        assert_eq!(state.consecutive_misses, 1);
+        state.record_miss();
+        assert_eq!(state.consecutive_misses, 2);
+    }
+
+    #[test]
+    fn peer_state_sliding_window_limits_size() {
+        let mut state = PeerState::new();
+        for _ in 0..10 {
+            state.record_heartbeat();
+        }
+        assert!(
+            state.heartbeat_window.len() <= HEARTBEAT_WINDOW_SIZE,
+            "Window should be capped at {}, got {}",
+            HEARTBEAT_WINDOW_SIZE,
+            state.heartbeat_window.len()
+        );
+    }
+
+    #[test]
+    fn peer_state_inactive_when_empty_window() {
+        let state = PeerState::new();
+        assert!(state.is_inactive(300));
+    }
+
+    #[test]
+    fn peer_state_not_inactive_after_heartbeat() {
+        let mut state = PeerState::new();
+        state.record_heartbeat();
+        assert!(!state.is_inactive(300));
+    }
+
+    #[test]
+    fn peer_state_reconnect_backoff_increases() {
+        let mut state = PeerState::new();
+        state.schedule_reconnect();
+        let first_backoff = state.next_reconnect;
+        state.schedule_reconnect();
+        let second_backoff = state.next_reconnect;
+        assert!(
+            second_backoff > first_backoff,
+            "Backoff should increase with each attempt"
+        );
+    }
+
+    #[test]
+    fn peer_state_reconnect_stops_after_max_attempts() {
+        let mut state = PeerState::new();
+        for _ in 0..6 {
+            state.schedule_reconnect();
+        }
+        assert!(!state.should_reconnect());
+    }
+
+    #[test]
+    fn peer_state_reconnect_allowed_initially() {
+        let state = PeerState::new();
+        assert!(state.should_reconnect());
+    }
 }

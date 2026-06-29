@@ -114,7 +114,87 @@ async fn rate_limit_middleware(
 }
 
 pub async fn create_api(state: ApiState, addr: SocketAddr) -> Result<(), std::io::Error> {
-    let app = Router::new()
+    let app = build_router(state);
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+    Ok(())
+}
+
+pub async fn create_api_tls(
+    state: ApiState,
+    addr: SocketAddr,
+    cert_path: &std::path::Path,
+    key_path: &std::path::Path,
+) -> Result<(), std::io::Error> {
+    use std::io::BufReader;
+
+    let cert_file = std::fs::File::open(cert_path)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, format!("TLS cert: {e}")))?;
+    let key_file = std::fs::File::open(key_path)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, format!("TLS key: {e}")))?;
+
+    let mut cert_reader = BufReader::new(cert_file);
+    let certs: Vec<rustls::pki_types::CertificateDer> = rustls_pemfile::certs(&mut cert_reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("cert parse: {e}")))?;
+
+    let mut key_reader = BufReader::new(key_file);
+    let key = rustls_pemfile::private_key(&mut key_reader)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("key parse: {e}")))?
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "no private key found"))?;
+
+    let mut tls_config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("TLS config: {e}")))?;
+
+    tls_config.alpn_protocols = vec![b"http/1.1".to_vec()];
+
+    let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls_config));
+
+    let app = build_router(state);
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    println!("TLS API listening on https://{}", addr);
+
+    loop {
+        let (stream, _remote_addr) = listener.accept().await?;
+        let tls_acceptor = tls_acceptor.clone();
+        let app = app.clone();
+
+        tokio::spawn(async move {
+            match tls_acceptor.accept(stream).await {
+                Ok(tls_stream) => {
+                    let hyper_service = hyper_util::service::TowerToHyperService::new(app);
+                    if let Err(e) = hyper_util::server::conn::auto::Builder::new(
+                        hyper_util::rt::TokioExecutor::new(),
+                    )
+                    .serve_connection(
+                        hyper_util::rt::TokioIo::new(tls_stream),
+                        hyper_service,
+                    )
+                    .await
+                    {
+                        eprintln!("TLS session error: {}", e);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("TLS handshake failed: {}", e);
+                }
+            }
+        });
+    }
+}
+
+fn build_router(state: ApiState) -> Router {
+    Router::new()
         .route("/health", get(health))
         .route("/node", get(node_info))
         .route("/epa", post(receive_epa))
@@ -130,17 +210,7 @@ pub async fn create_api(state: ApiState, addr: SocketAddr) -> Result<(), std::io
             state.clone(),
             rate_limit_middleware,
         ))
-        .with_state(state);
-
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .await
-    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    Ok(())
+        .with_state(state)
 }
 
 async fn health() -> Json<ApiResponse> {

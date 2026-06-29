@@ -49,7 +49,7 @@ pub async fn run_pipeline(
     lgpd_index: Option<Arc<RwLock<crate::lgpd_rights::LgpdIndex>>>,
 ) -> Result<(), Box<dyn Error>> {
     let limiter = crate::defense::RateLimiter::new(100, Duration::from_secs(60));
-    let engine = crate::ai::MockEngine::new(0.70);
+    let engine = crate::ai::EvidenceEngine::new(0.30);
 
     let mut state = State::from_env()?;
 

@@ -63,6 +63,8 @@ struct Config {
     node_name: String,
     disable_encryption: bool,
     bootstrap_peers: Vec<SocketAddr>,
+    tls_cert: Option<std::path::PathBuf>,
+    tls_key: Option<std::path::PathBuf>,
 }
 
 impl Config {
@@ -80,6 +82,12 @@ impl Config {
                 .split(',')
                 .filter_map(|s: &str| s.trim().parse::<SocketAddr>().ok())
                 .collect(),
+            tls_cert: std::env::var("NEXOIA_TLS_CERT")
+                .ok()
+                .map(std::path::PathBuf::from),
+            tls_key: std::env::var("NEXOIA_TLS_KEY")
+                .ok()
+                .map(std::path::PathBuf::from),
         }
     }
 }
@@ -216,12 +224,27 @@ fn spawn_tasks(
         Arc::clone(pending),
     ));
     let ac = api_addr;
+    let tls_cert = cfg.tls_cert.clone();
+    let tls_key = cfg.tls_key.clone();
     tokio::spawn(async move {
-        if let Err(e) = api::create_api(api_state, ac).await {
+        let result = match (tls_cert, tls_key) {
+            (Some(cert), Some(key)) => {
+                println!("TLS: ENABLED (cert: {}, key: {})", cert.display(), key.display());
+                api::create_api_tls(api_state, ac, &cert, &key).await
+            }
+            _ => {
+                api::create_api(api_state, ac).await
+            }
+        };
+        if let Err(e) = result {
             eprintln!("API error: {}", e);
         }
     });
-    println!("API listening on http://{}", api_addr);
+    if cfg.tls_cert.is_some() && cfg.tls_key.is_some() {
+        println!("API listening on https://{}", api_addr);
+    } else {
+        println!("API listening on http://{}", api_addr);
+    }
     let ba: SocketAddr = ([255, 255, 255, 255], cfg.broadcast_port).into();
     tokio::spawn(run_discovery(
         node.clone(),

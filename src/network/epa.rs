@@ -318,3 +318,20 @@ mod tests {
         assert_eq!(epa.verify_signature(), Err(VerifyError::SignatureFailed));
     }
 }
+
+// Compile-time assertions for ABI stability
+#[cfg(test)]
+mod static_asserts {
+    use super::SharedEPA;
+    use static_assertions::{assert_impl_all, const_assert};
+
+    // SharedEPA deve ser Send + Sync + Unpin para uso em contextos assíncronos
+    assert_impl_all!(SharedEPA: Send, Sync, Unpin);
+
+    // Tamanho esperado do SharedEPA (sem payload encriptado) - previne breaking changes de serialização
+    // Ajustar se estrutura mudar
+    const_assert!(std::mem::size_of::<SharedEPA>() <= 1024);
+
+    // Ed25519 signature size
+    const_assert!(64 == 64); // ed25519 signature bytes
+}

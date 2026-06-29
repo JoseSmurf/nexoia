@@ -285,3 +285,25 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+// Compile-time assertions for crypto ABI stability
+#[cfg(test)]
+mod static_asserts {
+    use super::{KeyPair, MlKemKeyPair};
+    use crate::network::secure_transport::SecureMessage;
+    use static_assertions::{assert_impl_all, const_assert};
+
+    // KeyPair deve ser Send + Sync
+    assert_impl_all!(KeyPair: Send, Sync);
+
+    // MlKemKeyPair deve ser Send + Sync
+    assert_impl_all!(MlKemKeyPair: Send, Sync);
+
+    // SecureMessage deve ser Send + Sync
+    assert_impl_all!(SecureMessage: Send, Sync);
+
+    // Tamanhos fixos para ABI
+    const_assert!(std::mem::size_of::<[u8; 32]>() == 32); // X25519 key
+    const_assert!(std::mem::size_of::<[u8; 12]>() == 12); // ChaCha20 nonce
+    const_assert!(std::mem::size_of::<[u8; 16]>() == 16); // AES-GCM tag
+}

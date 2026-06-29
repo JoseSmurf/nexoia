@@ -349,8 +349,8 @@ async fn get_compliance(
         derivation_chain,
         provenance_integrity: true,
         lgpd_metadata_present: lgpd_present,
-        witness_count: witness_count,
-        attested: attested,
+        witness_count,
+        attested,
     }))
 }
 

@@ -27,8 +27,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         io::Error::new(io::ErrorKind::InvalidInput, "usage: verify <artifact-dir>")
     })?;
 
-    let report = verify_core::run(root)
-        .map_err(|err| io::Error::other(err.to_string()))?;
+    let report = verify_core::run(root).map_err(|err| io::Error::other(err.to_string()))?;
     let output = serde_json::to_string_pretty(&report)?;
     println!("{output}");
 

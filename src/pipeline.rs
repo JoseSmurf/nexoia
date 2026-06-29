@@ -48,7 +48,6 @@ pub async fn run_pipeline(
     data_path: &Path,
     lgpd_index: Option<Arc<RwLock<crate::lgpd_rights::LgpdIndex>>>,
     provenance_nodes: &Arc<RwLock<Vec<crate::provenance::ProvenanceNode>>>,
-    artifacts_dir: Option<&Path>,
 ) -> Result<(), Box<dyn Error>> {
     let limiter = crate::defense::RateLimiter::new(100, Duration::from_secs(60));
     let engine = crate::ai::EvidenceEngine::new(0.30);
@@ -128,7 +127,7 @@ pub async fn run_pipeline(
         crate::types::EvidenceStrength::Unverifiable => "local",
     };
 
-    let out_dir = artifacts_dir.unwrap_or(Path::new("."));
+    let out_dir = data_path;
     write_text(out_dir.join("state.json"), &state_json)?;
     let state_hash = canonical_hash(&state_json);
 

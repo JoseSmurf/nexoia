@@ -429,7 +429,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &ctx.data_path,
         Some(lgpd_index),
         &ctx.provenance_nodes,
-        Some(&ctx.data_path),
     )
     .await?;
     println!("\nNode running. Press Ctrl+C to stop.");

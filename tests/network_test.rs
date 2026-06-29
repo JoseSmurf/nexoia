@@ -21,8 +21,7 @@ async fn two_nodes_can_communicate() {
 
     transport_a.send(&ping, addr_b).await.unwrap();
 
-    let mut buf = [0u8; 65536];
-    let (msg, from) = transport_b.recv(&mut buf).await.unwrap();
+    let (msg, from) = transport_b.recv().await.unwrap();
     assert!(matches!(msg, NetworkMessage::Ping { .. }));
     assert_eq!(from, addr_a);
 }
@@ -47,8 +46,7 @@ async fn epa_sharing_between_nodes() {
     let msg = NetworkMessage::EPA(epa.clone());
     transport_a.send(&msg, addr_b).await.unwrap();
 
-    let mut buf = [0u8; 65536];
-    let (received, _) = transport_b.recv(&mut buf).await.unwrap();
+    let (received, _) = transport_b.recv().await.unwrap();
     if let NetworkMessage::EPA(received_epa) = received {
         assert!(received_epa.verify_full().is_ok());
         assert_eq!(received_epa.epa_id, epa.epa_id);

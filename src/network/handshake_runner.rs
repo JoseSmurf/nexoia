@@ -34,9 +34,8 @@ pub async fn run_udp_listener(
     session_manager: Arc<SessionManager>,
     pending_handshakes: Arc<RwLock<HashMap<SocketAddr, PendingHandshake>>>,
 ) {
-    let mut recv_buf = [0u8; 65536];
     loop {
-        match transport.recv(&mut recv_buf).await {
+        match transport.recv().await {
             Ok((msg, addr)) => match msg {
                 // ============================================
                 // HANDSHAKE (4 fases)

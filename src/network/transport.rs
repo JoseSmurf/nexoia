@@ -1,7 +1,10 @@
 use crate::network::epa::SharedEPA;
+use ahash::AHashMap;
+use bytes::BytesMut;
 use chrono::{DateTime, Utc};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use smallvec::SmallVec;
 use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 
@@ -71,7 +74,7 @@ pub struct PeerState {
     pub reconnect_attempts: u32,
     pub next_reconnect: DateTime<Utc>,
     /// Janela de heartbeat: armazena os últimos N heartbeats recebidos
-    pub heartbeat_window: Vec<DateTime<Utc>>,
+    pub heartbeat_window: SmallVec<[DateTime<Utc>; HEARTBEAT_WINDOW_SIZE]>,
 }
 
 /// Tamanho da janela de heartbeat para sliding window.
@@ -88,7 +91,7 @@ impl PeerState {
             last_seen: Utc::now(),
             reconnect_attempts: 0,
             next_reconnect: Utc::now(),
-            heartbeat_window: Vec::with_capacity(HEARTBEAT_WINDOW_SIZE),
+            heartbeat_window: SmallVec::new(),
         }
     }
 
@@ -101,10 +104,10 @@ impl PeerState {
         self.reconnect_attempts = 0;
 
         // Adiciona à janela e mantém apenas os últimos N
-        self.heartbeat_window.push(now);
-        if self.heartbeat_window.len() > HEARTBEAT_WINDOW_SIZE {
+        if self.heartbeat_window.len() == HEARTBEAT_WINDOW_SIZE {
             self.heartbeat_window.remove(0);
         }
+        self.heartbeat_window.push(now);
     }
 
     /// Registra miss (heartbeat não recebido).
@@ -154,16 +157,16 @@ pub struct TrustedPeer {
 }
 
 /// Lista de peers autenticados.
-/// Usa BTreeMap para serialização determinística (ordem das chaves fixa).
+/// Usa AHashMap para performance (DoS-resistant, hardware-accelerated).
 pub struct TrustedPeerList {
-    peers: BTreeMap<SocketAddr, TrustedPeer>,
+    peers: AHashMap<SocketAddr, TrustedPeer>,
     max_peers: usize,
 }
 
 impl TrustedPeerList {
     pub fn new(max_peers: usize) -> Self {
         Self {
-            peers: BTreeMap::new(),
+            peers: AHashMap::with_capacity(max_peers),
             max_peers,
         }
     }
@@ -224,12 +227,17 @@ impl TrustedPeerList {
 /// Compartilhado via `Arc<UdpTransport>`. O socket UDP permite `send_to` concorrente com `recv_from`.
 pub struct UdpTransport {
     socket: UdpSocket,
+    /// Pool de buffers para zero-copy receive
+    recv_pool: Mutex<Vec<BytesMut>>,
 }
 
 impl UdpTransport {
     pub async fn bind(addr: SocketAddr) -> Result<Self, std::io::Error> {
         let socket = UdpSocket::bind(addr).await?;
-        Ok(Self { socket })
+        Ok(Self {
+            socket,
+            recv_pool: Mutex::new(Vec::with_capacity(32)),
+        })
     }
 
     /// Envia mensagem com length-prefix framing (4 bytes big-endian).
@@ -271,14 +279,23 @@ impl UdpTransport {
         Ok(())
     }
 
-    /// Recebe mensagem com length-prefix framing.
-    pub async fn recv(
-        &self,
-        buf: &mut [u8; 65536],
-    ) -> Result<(NetworkMessage, SocketAddr), std::io::Error> {
-        let (len, addr) = self.socket.recv_from(buf).await?;
+    /// Recebe mensagem com length-prefix framing usando buffer pool (zero-copy).
+    pub async fn recv(&self) -> Result<(NetworkMessage, SocketAddr), std::io::Error> {
+        // Pega buffer do pool ou aloca novo
+        let mut buf = {
+            let mut pool = self.recv_pool.lock();
+            let mut b = pool.pop().unwrap_or_else(|| BytesMut::with_capacity(65536));
+            // Resize to capacity so recv_from has space to write
+            b.resize(b.capacity(), 0);
+            b
+        };
+
+        let (len, addr) = self.socket.recv_from(&mut buf).await?;
 
         if len < 4 {
+            // Devolve buffer ao pool
+            buf.clear();
+            self.recv_pool.lock().push(buf);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Message too short for frame header",
@@ -291,14 +308,22 @@ impl UdpTransport {
         let expected_len = u32::from_be_bytes(len_bytes) as usize;
 
         if len < 4 + expected_len {
+            buf.clear();
+            self.recv_pool.lock().push(buf);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Message truncated",
             ));
         }
 
-        let msg: NetworkMessage = serde_json::from_slice(&buf[4..4 + expected_len])
+        // Parse JSON do payload (precisa copiar para owned para deserialize)
+        let payload = &buf[4..4 + expected_len];
+        let msg: NetworkMessage = serde_json::from_slice(payload)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        // Devolve buffer ao pool
+        buf.clear();
+        self.recv_pool.lock().push(buf);
 
         Ok((msg, addr))
     }

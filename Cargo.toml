@@ -27,10 +27,20 @@ tokio-rustls = "0.26"
 rustls-pemfile = "2"
 pem = "3"
 hyper-util = { version = "0.1", features = ["tokio", "server-auto", "server"] }
+parking_lot = "0.12"
+ahash = "0.8"
+smallvec = "1"
+bytes = "1"
+bumpalo = "3"
+static_assertions = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 
 [dev-dependencies]
 tempfile = "3"
 tower = { version = "0.4", features = ["util"] }
+cargo-bloat = "0.1"
+cargo-llvm-cov = "0.6"
 
 [[bin]]
 name = "verify"

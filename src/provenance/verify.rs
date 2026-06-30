@@ -106,6 +106,9 @@ pub fn verify_directory(root: impl AsRef<Path>) -> Result<VerifyReport, VerifyEr
         parse_optional_jsonl::<EvidenceRecord>(&evidence_text, "evidence.jsonl")?;
 
     validate_manifest_artifact(&manifest, "decisions.jsonl", &decisions_text, true)?;
+    if let Ok(state_text) = read_required_text(&root.join("state.json")) {
+        validate_manifest_artifact(&manifest, "state.json", &state_text, false)?;
+    }
     if let Some(text) = evidence_text.as_deref() {
         if !text.trim().is_empty() {
             validate_manifest_artifact(&manifest, "evidence.jsonl", text, true)?;

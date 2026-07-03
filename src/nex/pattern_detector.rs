@@ -44,9 +44,16 @@ pub struct Feature {
 /// Detector de padrões
 pub struct PatternDetector {
     features: HashMap<Feature, usize>,
+    #[allow(dead_code)]
     padroes: Vec<Pattern>,
     min_frequencia: usize,
     min_confianca: f64,
+}
+
+impl Default for PatternDetector {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PatternDetector {
@@ -72,7 +79,12 @@ impl PatternDetector {
         // Features do estado
         features.push(Feature {
             categoria: "build".into(),
-            valor: if iter.estado_anterior.build_ok { "ok" } else { "fail" }.into(),
+            valor: if iter.estado_anterior.build_ok {
+                "ok"
+            } else {
+                "fail"
+            }
+            .into(),
         });
         features.push(Feature {
             categoria: "tests".into(),
@@ -143,7 +155,10 @@ impl PatternDetector {
                         kind: PatternKind::Recorrencia,
                         descricao: format!(
                             "{}={} aparece {} vezes ({:.0}%)",
-                            feature.categoria, feature.valor, freq, confianca * 100.0
+                            feature.categoria,
+                            feature.valor,
+                            freq,
+                            confianca * 100.0
                         ),
                         frequencia: *freq,
                         confianca,
@@ -196,10 +211,7 @@ impl PatternDetector {
             if *freq >= self.min_frequencia {
                 padroes.push(Pattern {
                     kind: PatternKind::Correlacao,
-                    descricao: format!(
-                        "Ação '{}' resulta em '{}' {} vezes",
-                        acao, resultado, freq
-                    ),
+                    descricao: format!("Ação '{}' resulta em '{}' {} vezes", acao, resultado, freq),
                     frequencia: *freq,
                     confianca: *freq as f64 / historico.len() as f64,
                     evidencia: vec![format!("corr:{}→{}", acao, resultado)],
@@ -213,6 +225,7 @@ impl PatternDetector {
     }
 
     /// Resumo do detector
+    #[allow(dead_code)]
     pub fn resumo(&self) -> String {
         format!(
             "features={}, padroes_detectados={}, min_freq={}, min_conf={:.2}",
@@ -263,8 +276,12 @@ mod tests {
             },
         );
         let features = PatternDetector::extrair_features(&iter);
-        assert!(features.iter().any(|f| f.categoria == "build" && f.valor == "ok"));
-        assert!(features.iter().any(|f| f.categoria == "resultado" && f.valor == "sucesso"));
+        assert!(features
+            .iter()
+            .any(|f| f.categoria == "build" && f.valor == "ok"));
+        assert!(features
+            .iter()
+            .any(|f| f.categoria == "resultado" && f.valor == "sucesso"));
     }
 
     #[test]

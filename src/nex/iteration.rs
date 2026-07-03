@@ -59,7 +59,7 @@ pub struct IterationLog {
 }
 
 impl IterationLog {
-    pub fn new(data_dir: &PathBuf) -> Self {
+    pub fn new(data_dir: &std::path::Path) -> Self {
         let dir = data_dir.join("iterations");
         fs::create_dir_all(&dir).ok();
 
@@ -69,7 +69,12 @@ impl IterationLog {
             .map(|entries| {
                 entries
                     .filter_map(|e| e.ok())
-                    .filter(|e| e.path().extension().map(|ext| ext == "json").unwrap_or(false))
+                    .filter(|e| {
+                        e.path()
+                            .extension()
+                            .map(|ext| ext == "json")
+                            .unwrap_or(false)
+                    })
                     .count() as u64
             })
             .unwrap_or(0);
@@ -132,6 +137,7 @@ impl IterationLog {
     }
 
     /// Lê a última iteração
+    #[allow(dead_code)]
     pub fn ultima(&self) -> Option<Iteration> {
         let latest = self.dir.join("latest.json");
         let data = fs::read_to_string(latest).ok()?;
@@ -145,7 +151,11 @@ impl IterationLog {
             for entry in entries.flatten() {
                 let path = entry.path();
                 // Ignora latest.json — só conta iterações numeradas
-                if path.file_stem().and_then(|s| s.to_str()).map(|s| s.starts_with("iter_")).unwrap_or(false)
+                if path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.starts_with("iter_"))
+                    .unwrap_or(false)
                     && path.extension().map(|e| e == "json").unwrap_or(false)
                 {
                     if let Ok(data) = fs::read_to_string(&path) {
@@ -161,6 +171,7 @@ impl IterationLog {
     }
 
     /// Estatísticas do histórico
+    #[allow(dead_code)]
     pub fn stats(&self) -> LogStats {
         let iters = self.todas();
         let total = iters.len();
@@ -188,6 +199,7 @@ impl IterationLog {
     }
 
     /// Hash da cadeia de iterações (prova de integridade)
+    #[allow(dead_code)]
     pub fn chain_hash(&self) -> String {
         let iters = self.todas();
         let content: String = iters.iter().map(|i| i.hash.clone()).collect();
@@ -196,6 +208,7 @@ impl IterationLog {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct LogStats {
     pub total: usize,
     pub sucessos: usize,
@@ -221,7 +234,7 @@ mod tests {
     #[test]
     fn iteration_log_registra_e_le() {
         let dir = tempfile::tempdir().unwrap();
-        let mut log = IterationLog::new(&dir.path().to_path_buf());
+        let mut log = IterationLog::new(dir.path());
 
         let estado = SystemState {
             build_ok: true,
@@ -285,7 +298,7 @@ mod tests {
     #[test]
     fn iteration_log_stats() {
         let dir = tempfile::tempdir().unwrap();
-        let mut log = IterationLog::new(&dir.path().to_path_buf());
+        let mut log = IterationLog::new(dir.path());
 
         let estado = SystemState {
             build_ok: true,
@@ -299,22 +312,40 @@ mod tests {
         // Registra 3 iterações
         log.registrar(
             estado.clone(),
-            Action { tipo: "a".into(), descricao: "".into(), arquivos: vec![] },
-            Outcome::Sucesso { mensagem: "ok".into() },
+            Action {
+                tipo: "a".into(),
+                descricao: "".into(),
+                arquivos: vec![],
+            },
+            Outcome::Sucesso {
+                mensagem: "ok".into(),
+            },
             Some("lição 1".into()),
             None,
         );
         log.registrar(
             estado.clone(),
-            Action { tipo: "b".into(), descricao: "".into(), arquivos: vec![] },
-            Outcome::Falha { erro: "erro".into() },
+            Action {
+                tipo: "b".into(),
+                descricao: "".into(),
+                arquivos: vec![],
+            },
+            Outcome::Falha {
+                erro: "erro".into(),
+            },
             Some("lição 2".into()),
             None,
         );
         log.registrar(
             estado,
-            Action { tipo: "c".into(), descricao: "".into(), arquivos: vec![] },
-            Outcome::NenhumaAcao { motivo: "ok".into() },
+            Action {
+                tipo: "c".into(),
+                descricao: "".into(),
+                arquivos: vec![],
+            },
+            Outcome::NenhumaAcao {
+                motivo: "ok".into(),
+            },
             None,
             None,
         );

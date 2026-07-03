@@ -51,14 +51,14 @@ fn parse_test_results(output: &str) -> (usize, usize, usize) {
             }
             if let Some(f) = rest.split("failed").next() {
                 if let Some(past_passed) = f.split("passed;").nth(1) {
-                    if let Some(n) = past_passed.trim().split_whitespace().next() {
+                    if let Some(n) = past_passed.split_whitespace().next() {
                         failed += n.parse().unwrap_or(0);
                     }
                 }
             }
             if let Some(i) = rest.split("ignored").next() {
                 if let Some(past_failed) = i.split("failed;").nth(1) {
-                    if let Some(n) = past_failed.trim().split_whitespace().next() {
+                    if let Some(n) = past_failed.split_whitespace().next() {
                         ignored += n.parse().unwrap_or(0);
                     }
                 }
@@ -92,7 +92,11 @@ fn main() {
     println!("[1/4] cargo build...");
     let (build_ok, build_err) = run_cmd(&cargo, &["build"], &project_dir);
     let build_warnings = count_warnings(&build_err);
-    println!("  → {} ({} warnings)", if build_ok { "OK" } else { "FAIL" }, build_warnings);
+    println!(
+        "  → {} ({} warnings)",
+        if build_ok { "OK" } else { "FAIL" },
+        build_warnings
+    );
 
     // 2. Test
     println!("[2/4] cargo test...");
@@ -102,9 +106,17 @@ fn main() {
 
     // 3. Clippy
     println!("[3/4] cargo clippy...");
-    let (clippy_ok, clippy_err) = run_cmd(&cargo, &["clippy", "--all-targets", "--", "-D", "warnings"], &project_dir);
+    let (clippy_ok, clippy_err) = run_cmd(
+        &cargo,
+        &["clippy", "--all-targets", "--", "-D", "warnings"],
+        &project_dir,
+    );
     let clippy_warnings = count_warnings(&clippy_err);
-    println!("  → {} ({} warnings)", if clippy_ok { "OK" } else { "FAIL" }, clippy_warnings);
+    println!(
+        "  → {} ({} warnings)",
+        if clippy_ok { "OK" } else { "FAIL" },
+        clippy_warnings
+    );
 
     // 4. Fmt
     println!("[4/4] cargo fmt --check...");
@@ -112,7 +124,10 @@ fn main() {
     println!("  → {}", if fmt_ok { "OK" } else { "NEEDS FMT" });
 
     // Compute overall hash
-    let overall_content = format!("{}:{}:{}:{}:{}:{}:{}", build_ok, build_warnings, tp, tf, clippy_ok, clippy_warnings, fmt_ok);
+    let overall_content = format!(
+        "{}:{}:{}:{}:{}:{}:{}",
+        build_ok, build_warnings, tp, tf, clippy_ok, clippy_warnings, fmt_ok
+    );
     let overall_hash = canonical_hash(&overall_content);
 
     let healthy = build_ok && tf == 0 && clippy_ok && fmt_ok;
@@ -134,7 +149,18 @@ fn main() {
   "healthy": {},
   "overall_hash": "{}"
 }}"#,
-        timestamp, timestamp_iso, build_ok, build_warnings, tp, tf, ti, clippy_ok, clippy_warnings, fmt_ok, healthy, overall_hash
+        timestamp,
+        timestamp_iso,
+        build_ok,
+        build_warnings,
+        tp,
+        tf,
+        ti,
+        clippy_ok,
+        clippy_warnings,
+        fmt_ok,
+        healthy,
+        overall_hash
     );
 
     // Save report
@@ -145,7 +171,14 @@ fn main() {
 
     println!("\n═══════════════════════════════════════════════");
     println!("Health Hash: {}", &overall_hash[..16]);
-    println!("Status: {}", if healthy { "HEALTHY ✓" } else { "NEEDS ATTENTION ⚠" });
+    println!(
+        "Status: {}",
+        if healthy {
+            "HEALTHY ✓"
+        } else {
+            "NEEDS ATTENTION ⚠"
+        }
+    );
     println!("Report: {}", filepath.display());
     println!("═══════════════════════════════════════════════");
 }

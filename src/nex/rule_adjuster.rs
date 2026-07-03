@@ -42,10 +42,7 @@ pub enum Regra {
     /// Negação de regra
     Nao(Box<Regra>),
     /// Ação a ser executada quando regra é verdadeira
-    Acao {
-        condicao: Box<Regra>,
-        acao: String,
-    },
+    Acao { condicao: Box<Regra>, acao: String },
 }
 
 /// Resultado de um ajuste
@@ -60,9 +57,16 @@ pub struct AjusteResultado {
 
 /// Módulo de ajuste de regras
 pub struct RuleAdjuster {
+    #[allow(dead_code)]
     regras: Vec<Regra>,
     historico_ajustes: Vec<AjusteResultado>,
     max_historico: usize,
+}
+
+impl Default for RuleAdjuster {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RuleAdjuster {
@@ -74,6 +78,7 @@ impl RuleAdjuster {
         }
     }
 
+    #[allow(dead_code)]
     pub fn com_regras(regras: Vec<Regra>) -> Self {
         Self {
             regras,
@@ -132,10 +137,7 @@ impl RuleAdjuster {
                             valor: 1.0,
                         },
                     ]),
-                    justificativa: format!(
-                        "Causalidade detectada: {}",
-                        padrao.descricao
-                    ),
+                    justificativa: format!("Causalidade detectada: {}", padrao.descricao),
                     confianca: padrao.confianca,
                 });
             }
@@ -153,11 +155,13 @@ impl RuleAdjuster {
     }
 
     /// Número de regras
+    #[allow(dead_code)]
     pub fn num_regras(&self) -> usize {
         self.regras.len()
     }
 
     /// Número de ajustes feitos
+    #[allow(dead_code)]
     pub fn num_ajustes(&self) -> usize {
         self.historico_ajustes.len()
     }
@@ -165,6 +169,7 @@ impl RuleAdjuster {
 
 impl Regra {
     /// Avalia a regra contra um contexto
+    #[allow(dead_code)]
     pub fn avaliar(&self, ctx: &HashMap<String, f64>) -> bool {
         match self {
             Regra::Condicao {
@@ -191,6 +196,7 @@ impl Regra {
     }
 
     /// Profundidade da AST
+    #[allow(dead_code)]
     pub fn profundidade(&self) -> usize {
         match self {
             Regra::Condicao { .. } => 1,
@@ -203,6 +209,7 @@ impl Regra {
     }
 
     /// Número de nós na AST
+    #[allow(dead_code)]
     pub fn num_nos(&self) -> usize {
         match self {
             Regra::Condicao { .. } => 1,

@@ -40,6 +40,7 @@ pub struct Manifest {
     pub lgpd_hash: Option<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_pipeline(
     node: &NodeIdentity,
     peers: &Arc<RwLock<PeerList>>,
@@ -48,6 +49,8 @@ pub async fn run_pipeline(
     data_path: &Path,
     lgpd_index: Option<Arc<RwLock<crate::lgpd_rights::LgpdIndex>>>,
     provenance_nodes: &Arc<RwLock<Vec<crate::provenance::ProvenanceNode>>>,
+    reputation: Option<Arc<RwLock<crate::network::reputation::ReputationStore>>>,
+    derivation_index: Option<Arc<RwLock<crate::provenance::DerivationIndex>>>,
 ) -> Result<(), Box<dyn Error>> {
     let limiter = crate::defense::RateLimiter::new(100, Duration::from_secs(60));
     let engine = crate::ai::EvidenceEngine::new(0.30);
@@ -170,28 +173,32 @@ pub async fn run_pipeline(
 
     println!("\nEPA created: {}", epa);
 
-    // ── Observer Integration ──────────────────────────────────
-    // Observa o EPA recém-criado via locks compartilhados
+    // ── Observer Integration (com locks reais) ─────────────────
     {
+        let rep = reputation.unwrap_or_else(|| {
+            Arc::new(RwLock::new(
+                crate::network::reputation::ReputationStore::new(),
+            ))
+        });
+        let deriv = derivation_index
+            .unwrap_or_else(|| Arc::new(RwLock::new(crate::provenance::DerivationIndex::new())));
+        let idx = lgpd_index
+            .clone()
+            .unwrap_or_else(|| Arc::new(RwLock::new(crate::lgpd_rights::LgpdIndex::new())));
+
         let observer = crate::nex::observer::NexObserver::new(
             Arc::clone(epas),
             Arc::clone(peers),
-            Arc::new(tokio::sync::RwLock::new(
-                crate::network::reputation::ReputationStore::new(),
-            )),
-            Arc::new(tokio::sync::RwLock::new(
-                crate::lgpd_rights::LgpdIndex::new(),
-            )),
+            rep,
+            idx,
             Arc::clone(provenance_nodes),
-            Arc::new(tokio::sync::RwLock::new(
-                crate::provenance::DerivationIndex::new(),
-            )),
+            deriv,
         );
 
         let report = observer.report().await;
         if report.overall != crate::nex::observer::Severity::Ok {
             eprintln!(
-                "⚠ Observer: {} ({} findings)",
+                "Observer: {} ({} findings)",
                 report.overall,
                 report.findings.len()
             );
@@ -203,6 +210,27 @@ pub async fn run_pipeline(
         }
     }
     // ── End Observer Integration ──────────────────────────────
+
+    // ── BehaviorEngine Integration (ciclo de auto-programação) ──
+    {
+        let project_dir = std::env::var("CARGO_MANIFEST_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let data_dir = data_path.to_path_buf();
+        let mut iteration_log = crate::nex::iteration::IterationLog::new(&data_dir);
+        let mut engine = crate::nex::behavior_engine::BehaviorEngine::new(&data_dir, &project_dir);
+
+        let resultado = engine.ciclo(&mut iteration_log);
+        if resultado.acoes_executadas > 0 {
+            println!(
+                "BehaviorEngine: {} ações, score={:.4}, hash={}",
+                resultado.acoes_executadas,
+                resultado.score,
+                &resultado.hash[..16.min(resultado.hash.len())]
+            );
+        }
+    }
+    // ── End BehaviorEngine Integration ────────────────────────
 
     {
         let mut epa_list = epas.write().await;

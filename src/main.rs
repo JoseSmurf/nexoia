@@ -466,6 +466,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &ctx.data_path,
         Some(lgpd_index),
         &ctx.provenance_nodes,
+        Some(Arc::clone(&ctx.reputation)),
+        Some(derivation_index),
     )
     .await?;
     println!("\nNode running. Press Ctrl+C to stop.");

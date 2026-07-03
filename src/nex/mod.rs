@@ -1,5 +1,6 @@
 pub mod action_executor;
 pub mod ast;
+pub mod behavior_engine;
 pub mod brain;
 pub mod checkpoint;
 pub mod eval;
@@ -12,6 +13,7 @@ pub mod parser;
 pub mod pattern_detector;
 pub mod reactive;
 pub mod rule_adjuster;
+pub mod self_awareness;
 
 use blake3::Hasher;
 use serde::Serialize;

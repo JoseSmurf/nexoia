@@ -7,19 +7,23 @@
 //!
 //! "Sem feedback, não há aprendizado. Sem aprendizado, não há evolução."
 
+use crate::hash::canonical_hash;
 use crate::nex::iteration::{Iteration, IterationLog, Outcome, SystemState};
 use crate::nex::pattern_detector::PatternDetector;
-use crate::nex::rule_adjuster::{AjusteResultado, RuleAdjuster};
-use crate::hash::canonical_hash;
+use crate::nex::rule_adjuster::RuleAdjuster;
 
 /// Resultado de uma iteração do feedback loop
 #[derive(Debug, Clone)]
 pub struct FeedbackResult {
+    #[allow(dead_code)]
     pub iteration_id: u64,
     pub padroes_novos: usize,
+    #[allow(dead_code)]
     pub ajustes_sugeridos: usize,
+    #[allow(dead_code)]
     pub ajustes_aplicados: usize,
     pub score: f64,
+    #[allow(dead_code)]
     pub hash: String,
 }
 
@@ -29,6 +33,12 @@ pub struct FeedbackLoop {
     adjuster: RuleAdjuster,
     last_score: f64,
     total_iterations: usize,
+}
+
+impl Default for FeedbackLoop {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FeedbackLoop {
@@ -104,7 +114,10 @@ impl FeedbackLoop {
             }
         } else if padroes_novos > 0 {
             Outcome::NenhumaAcao {
-                motivo: format!("{} padrões detectados, nenhum ajuste necessário", padroes_novos),
+                motivo: format!(
+                    "{} padrões detectados, nenhum ajuste necessário",
+                    padroes_novos
+                ),
             }
         } else {
             Outcome::NenhumaAcao {
@@ -132,7 +145,11 @@ impl FeedbackLoop {
     }
 
     /// Calcula score baseado no histórico
-    fn calcular_score(&self, historico: &[Iteration], padroes: &[crate::nex::pattern_detector::Pattern]) -> f64 {
+    fn calcular_score(
+        &self,
+        historico: &[Iteration],
+        padroes: &[crate::nex::pattern_detector::Pattern],
+    ) -> f64 {
         if historico.is_empty() {
             return 0.0;
         }
@@ -154,13 +171,15 @@ impl FeedbackLoop {
     }
 
     /// Resumo do ciclo
+    #[allow(dead_code)]
     pub fn resumo(&self) -> String {
         format!(
-            "iterações={}, score={:.4}, detector={}, adjuster={}",
+            "iterações={}, score={:.4}, detector={}, regras={}, ajustes={}",
             self.total_iterations,
             self.last_score,
             self.detector.resumo(),
-            format!("regras={}, ajustes={}", self.adjuster.num_regras(), self.adjuster.num_ajustes())
+            self.adjuster.num_regras(),
+            self.adjuster.num_ajustes()
         )
     }
 }
@@ -173,7 +192,7 @@ mod tests {
     #[test]
     fn feedback_loop_executa() {
         let dir = tempdir().unwrap();
-        let mut log = IterationLog::new(&dir.path().to_path_buf());
+        let mut log = IterationLog::new(dir.path());
         let mut loop_ = FeedbackLoop::new();
 
         // Registra algumas iterações iniciais
@@ -203,17 +222,17 @@ mod tests {
 
         let result = loop_.executar(&mut log);
         assert!(result.score >= 0.0);
-        assert!(result.hash.len() > 0);
+        assert!(!result.hash.is_empty());
     }
 
     #[test]
     fn feedback_loop_score_melhora() {
         let dir = tempdir().unwrap();
-        let mut log = IterationLog::new(&dir.path().to_path_buf());
+        let mut log = IterationLog::new(dir.path());
         let mut loop_ = FeedbackLoop::new();
 
         // Iterações com sucesso
-        for i in 0..10 {
+        for _i in 0..10 {
             log.registrar(
                 SystemState {
                     build_ok: true,

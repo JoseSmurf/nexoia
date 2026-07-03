@@ -52,3 +52,7 @@ path = "src/bin/nex.rs"
 [[bin]]
 name = "daemon"
 path = "src/bin/daemon.rs"
+
+[[bin]]
+name = "awaken"
+path = "src/bin/awaken.rs"

@@ -6,11 +6,10 @@
 
 use crate::hash::canonical_hash;
 use crate::nex::brain::{BrainConfigBuilder, NexBrain};
-use crate::types::EvidenceProvider;
-use std::collections::HashMap;
 
 /// Princípio fundamental do NexoIA
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Principio {
     pub nome: String,
     pub descricao: String,
@@ -19,6 +18,7 @@ pub struct Principio {
 
 /// Capacidade demonstrada (não alegada)
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Capacidade {
     pub nome: String,
     pub evidencia: String,
@@ -27,6 +27,7 @@ pub struct Capacidade {
 
 /// O manifesto gerado pelo próprio sistema
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Manifesto {
     pub titulo: String,
     pub principios: Vec<Principio>,
@@ -38,6 +39,7 @@ pub struct Manifesto {
 
 impl Manifesto {
     /// Gera manifesto a partir do estado real do sistema
+    #[allow(dead_code)]
     pub fn gerar() -> Self {
         let principios = vec![
             Principio {
@@ -106,6 +108,7 @@ impl Manifesto {
     }
 
     /// Descobre capacidades reais do sistema (não alegadas)
+    #[allow(dead_code)]
     fn descobrir_capacidades() -> Vec<Capacidade> {
         let mut capacidades = Vec::new();
 
@@ -152,6 +155,7 @@ impl Manifesto {
     }
 
     /// Calcula hash do manifesto (prova de integridade)
+    #[allow(dead_code)]
     fn calcular_hash(&self) -> String {
         let content = format!(
             "{}:{}:{}:{}:{}",
@@ -165,6 +169,7 @@ impl Manifesto {
     }
 
     /// Exporta manifesto como texto legível por humanos
+    #[allow(dead_code)]
     pub fn para_texto(&self) -> String {
         let mut texto = format!("{}\n", self.titulo);
         texto.push_str(&"=".repeat(self.titulo.len()));
@@ -200,8 +205,10 @@ impl Manifesto {
         texto.push('\n');
 
         texto.push_str(&format!("Hash de integridade: {}\n", self.hash));
-        texto.push_str("\nQualquer pessoa pode verificar que este manifesto é \
-                        genuíno rodando:\n");
+        texto.push_str(
+            "\nQualquer pessoa pode verificar que este manifesto é \
+                        genuíno rodando:\n",
+        );
         texto.push_str("  cargo test nex::manifesto\n");
 
         texto

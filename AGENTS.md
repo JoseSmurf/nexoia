@@ -6,7 +6,7 @@ Instruções para IAs de código (GitHub Copilot, Cursor, Claude Code, Codex, et
 
 ## Visão Geral
 
-**NexoIA** é um motor de computação determinística em Rust (~11.200 linhas) que gera **EPAs (Evidence Proof Artifacts)**:
+**NexoIA** é um motor de computação determinística em Rust (~14.900 linhas) que gera **EPAs (Evidence Proof Artifacts)**:
 
 ```
 BLAKE3(input) + Ed25519(signature) + timestamp anti-replay = prova matemática imutável
@@ -22,12 +22,12 @@ Não é log. Não é auditoria. É **prova**. Qualquer pessoa verifica sem confi
 
 ## Estado Atual
 
-- 624 testes verdes (incluindo LGPD Nível 2)
+- 921 testes verdes (incluindo LGPD Nível 2) — verificado em 2026-07-03 com `cargo test 2>&1 | grep "test result:"`
 - LGPD Nível 1 (metadata) + Nível 2 (direitos do titular) implementados
 - 4 endpoints LGPD: `GET /titular/:hash/dados`, `GET /titular/:hash/export`, `DELETE /titular/:hash`, `POST /titular/:hash/revogar`
 - Pipeline → LGPD Index conectado automaticamente
 - Índice LGPD reconstruído na inicialização do nó
-- Rede P2P com 15 módulos (handshake, heartbeat, reputação, sessão, transporte seguro)
+- Rede P2P com 16 módulos (handshake, heartbeat, reputação, sessão, transporte seguro)
 - Linguagem NEX (DSL para compliance) com parser, avaliador, motor reativo
 - Rate limiter sharded com 64 shards
 
@@ -59,52 +59,57 @@ NEXOIA_LGPD_BASIS=consentimento NEXOIA_LGPD_PURPOSE=processamento NEXOIA_LGPD_RE
 
 | Arquivo | Propósito | Linhas |
 |---------|-----------|--------|
-| `src/main.rs` | Entry point + pipeline + rede P2P | 356 |
-| `src/lib.rs` | Re-exports de todos os módulos | 13 |
-| `src/pipeline.rs` | Orquestração state→EPA + manifest LGPD | 245 |
-| `src/state.rs` | State de execução + LGPD metadata | 129 |
+| `src/main.rs` | Entry point + pipeline + rede P2P | 505 |
+| `src/lib.rs` | Re-exports de todos os módulos | 18 |
+| `src/pipeline.rs` | Orquestração state→EPA + manifest LGPD | 317 |
+| `src/state.rs` | State de execução + LGPD metadata | 142 |
 | `src/lgpd.rs` | LawfulBasis, LgpdMetadata, validate() | 191 |
-| `src/lgpd_rights.rs` | EpaRef, LgpdIndex, anonimização, EPA de supressão | 349 |
-| `src/defense.rs` | Validação + RateLimiter sharded 64 shards | 229 |
-| `src/decision.rs` | Classificação determinística OK/VIOLACAO/ABSTERSE | 230 |
-| `src/explain.rs` | Diagnóstico + conflitos + load_decisions_jsonl | 404 |
-| `src/types.rs` | EvidenceStrength, NexAssertion, EvidenceProvider | 42 |
-| `src/hash.rs` | BLAKE3 canônico | 20 |
-| `src/limits.rs` | Constantes anti-DoS | 36 |
-| `src/ai.rs` | MockEngine placeholder | 96 |
-| `src/quality.rs` | Avaliação de evidência | 124 |
-| `src/evidence.rs` | Criação de registros de evidência | 136 |
+| `src/lgpd_rights.rs` | EpaRef, LgpdIndex, anonimização, EPA de supressão | 364 |
+| `src/defense.rs` | Validação + RateLimiter sharded 64 shards | 269 |
+| `src/decision.rs` | Classificação determinística OK/VIOLACAO/ABSTERSE | 419 |
+| `src/explain.rs` | Diagnóstico + conflitos + load_decisions_jsonl | 460 |
+| `src/types.rs` | EvidenceStrength, NexAssertion, EvidenceProvider | 49 |
+| `src/hash.rs` | BLAKE3 canônico | 23 |
+| `src/limits.rs` | Constantes anti-DoS | 40 |
+| `src/ai.rs` | EvidenceEngine (substituiu MockEngine) | 393 |
+| `src/quality.rs` | Avaliação de evidência | 138 |
+| `src/evidence.rs` | Criação de registros de evidência | 137 |
 
 ### Módulos Críticos (NUNCA DELETAR)
 
 ```
 src/nex/              — LINGUAGEM NEX (DSL para compliance)
-  ast.rs              — AST (Program, Stmt, Action, Expr, Trigger)         122
-  parser.rs           — Lexer + parser manual                               1.158
-  eval.rs             — Avaliador + executor + imports                      923
-  layers.rs           — Camadas Basic/Intermediate/Advanced                 163
-  reactive.rs         — Motor reativo eventos→regras→ações                  358
-  checkpoint.rs       — Checkpoints atômicos                                200
-  action_executor.rs  — Execução de ações reativas                          170
+  ast.rs              — AST (Program, Stmt, Action, Expr, Trigger)         133
+  parser.rs           — Lexer + parser manual                               1243
+  eval.rs             — Avaliador + executor + imports                      1009
+  layers.rs           — Camadas Basic/Intermediate/Advanced                 185
+  reactive.rs         — Motor reativo eventos→regras→ações                  441
+  checkpoint.rs       — Checkpoints atômicos                                243
+  action_executor.rs  — Execução de ações reativas                          196
 
-src/network/          — 15 MÓDULOS P2P
-  identity.rs         — NodeIdentity, Ed25519, X25519, ML-KEM
-  crypto.rs           — Criptografia
-  crypto_key.rs       — Chaves criptográficas
-  epa.rs              — SharedEPA, create, create_encrypted
-  handshake.rs        — Autenticação mútua challenge-response
-  handshake_runner.rs — Execução do handshake
-  heartbeat.rs        — Monitoramento de peers (30s interval, 5min timeout)
-  session.rs          — SessionManager, sessões ativas
-  transport.rs        — UdpTransport, PeerList, TrustedPeerList, NetworkMessage
-  secure_transport.rs — Transporte seguro
-  reputation.rs       — ReputationStore, ban automático após 10 falhas
-  persistence.rs      — Persistência JSON
-  api.rs              — REST API (Axum), RateLimiter
-  listener.rs         — Discovery broadcast UDP
-  verify.rs           — Verificação de EPA
+src/network/          — 16 MÓDULOS P2P
+  identity.rs         — NodeIdentity, Ed25519, X25519, ML-KEM               507
+  crypto.rs           — Criptografia                                        310
+  crypto_key.rs       — Chaves criptográficas                               96
+  epa.rs              — SharedEPA, create, create_encrypted                 342
+  handshake.rs        — Autenticação mútua challenge-response               255
+  handshake_runner.rs — Execução do handshake                               824
+  heartbeat.rs        — Monitoramento de peers (30s interval, 5min timeout) 217
+  session.rs          — SessionManager, sessões ativas                      416
+  transport.rs        — UdpTransport, PeerList, TrustedPeerList, NetworkMessage 634
+  secure_transport.rs — Transporte seguro                                   248
+  reputation.rs       — ReputationStore, ban automático após 10 falhas      248
+  persistence.rs      — Persistência JSON                                   263
+  api.rs              — REST API (Axum), RateLimiter                        1452
+  listener.rs         — Discovery broadcast UDP                             37
+  verify.rs           — Verificação de EPA                                  75
 
 src/provenance/       — Provenance tracking
+  aggregator.rs       — ProvenanceRef, DerivationIndex, ProvenanceChain     380
+  typed_node.rs       — TypedNode<T,S> com sealed Marker traits             176
+  compose.rs          — MinStrength trait (25 pares compile-time)           168
+  witness.rs          — WitnessSet, WitnessKind                             196
+  verify.rs           — Verificação de cadeia (disk artifacts)              576
 ```
 
 ---
@@ -118,6 +123,8 @@ src/provenance/       — Provenance tracking
 ║  2. sessions     (SessionManager)       ║
 ║  3. peers        (PeerList/TrustedPeer) ║
 ║  4. reputation   (ReputationStore)      ║
+║  5. epas         (Vec<SharedEPA>)       ║
+║  6. lgpd_index   (LgpdIndex)            ║
 ╚══════════════════════════════════════════╝
 ```
 
@@ -155,7 +162,7 @@ act id = action requires strength  # Registro de decisão
 - **Handshake**: Challenge-response mútuo
 - **Heartbeat**: 30s interval, timeout 5min
 - **Reputação**: Ban automático após 10 falhas consecutivas
-- **Transporte**: UDP com criptografia AES-GCM/ChaCha20Poly1305
+- **Transporte**: UDP com criptografia ChaCha20-Poly1305
 - **Discovery**: Broadcast UDP
 - **API REST**: Axum com rate limiter sharded (64 shards)
 
@@ -369,6 +376,40 @@ blake3, ed25519-dalek, serde, serde_json, tokio, axum,
 chrono, uuid, aes-gcm, chacha20poly1305, ml-kem,
 x25519-dalek, rusqlite
 ```
+
+---
+
+## Como Verificar Este Documento
+
+Toda alegação técnica neste documento pode ser confirmada independentemente. Rode:
+
+```bash
+# 1. Contagem de testes (deve mostrar 921 passing, 0 failed)
+cargo test 2>&1 | grep "test result:"
+
+# 2. Zero warnings de build
+cargo build --release 2>&1 | grep warning
+
+# 3. Formatação (CI enforced)
+cargo fmt --check
+
+# 4. Lock order no código (não deve haver inversões)
+grep -rn "lock\|Lock" src/main.rs | head -20
+
+# 5. Endpoints registrados no router de produção
+grep -n "verify-chain\|witness" src/network/api.rs
+
+# 6. LGPD env vars lidas no pipeline
+grep -n "NEXOIA_LGPD" src/pipeline.rs
+
+# 7. Dead code audit: nenhum #![allow(dead_code)] em crate-level
+grep -r "#!\[allow(dead_code)\]" src/lib.rs src/main.rs src/provenance/aggregator.rs src/provenance/typed_node.rs src/provenance/compose.rs
+
+# 8. BLAKE3 como único hash canônico
+grep -rn "canonical_hash\|blake3" src/hash.rs
+```
+
+Se algum comando acima falhar ou retornar algo inesperado, o documento está desatualizado.
 
 ---
 

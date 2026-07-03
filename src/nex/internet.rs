@@ -61,7 +61,6 @@ pub struct FetchResult {
 pub struct InternetFetcher {
     cache_dir: PathBuf,
     client: Option<reqwest::Client>,
-    blocking_client: Option<reqwest::blocking::Client>,
 }
 
 impl InternetFetcher {
@@ -77,17 +76,7 @@ impl InternetFetcher {
             .build()
             .ok();
 
-        let blocking_client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-            .user_agent("nexoia/0.1.0 (evidence-engine)")
-            .build()
-            .ok();
-
-        Self {
-            cache_dir,
-            client,
-            blocking_client,
-        }
+        Self { cache_dir, client }
     }
 
     /// Versão para testes — sem cliente HTTP real
@@ -99,7 +88,6 @@ impl InternetFetcher {
         Self {
             cache_dir,
             client: None,
-            blocking_client: None,
         }
     }
 
@@ -147,86 +135,6 @@ impl InternetFetcher {
         let content = response
             .text()
             .await
-            .map_err(|e| format!("Erro ao ler resposta: {}", e))?;
-
-        // 5. Valida tamanho
-        if content.len() > MAX_RESPONSE_BYTES {
-            return Err(format!(
-                "Resposta muito grande: {} bytes (máx: {})",
-                content.len(),
-                MAX_RESPONSE_BYTES
-            ));
-        }
-
-        // 6. Detecta content-type
-        let content_type = self.detect_content_type(url, &content);
-
-        // 7. Salva no cache
-        let content_hash = canonical_hash(&content);
-        let entry = CacheEntry {
-            url: url.to_string(),
-            url_hash: url_hash.clone(),
-            content_hash: content_hash.clone(),
-            fetched_at: Self::now(),
-            content: content.clone(),
-            content_type,
-        };
-
-        let _ = fs::write(
-            &cache_path,
-            serde_json::to_string(&entry).unwrap_or_default(),
-        );
-
-        Ok(FetchResult {
-            content,
-            from_cache: false,
-            url: url.to_string(),
-            content_hash,
-        })
-    }
-
-    /// Busca síncrona (bloqueante) — para uso em contextos não-async
-    #[allow(dead_code)]
-    pub fn fetch_sync(&self, url: &str) -> Result<FetchResult, String> {
-        // 1. Valida domínio
-        self.validate_url(url)?;
-
-        // 2. Gera hash do URL para chave de cache
-        let url_hash = canonical_hash(url);
-        let cache_path = self.cache_dir.join(format!("{}.json", &url_hash[..16]));
-
-        // 3. Verifica cache
-        if let Ok(content) = fs::read_to_string(&cache_path) {
-            if let Ok(entry) = serde_json::from_str::<CacheEntry>(&content) {
-                if self.is_cache_fresh(&entry) {
-                    return Ok(FetchResult {
-                        content: entry.content,
-                        from_cache: true,
-                        url: url.to_string(),
-                        content_hash: entry.content_hash,
-                    });
-                }
-            }
-        }
-
-        // 4. Busca da internet (bloqueante)
-        let client = self
-            .blocking_client
-            .as_ref()
-            .ok_or("InternetFetcher offline (sem cliente HTTP)")?;
-
-        let response = client
-            .get(url)
-            .send()
-            .map_err(|e| format!("Erro ao buscar {}: {}", url, e))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            return Err(format!("HTTP {} ao buscar {}", status, url));
-        }
-
-        let content = response
-            .text()
             .map_err(|e| format!("Erro ao ler resposta: {}", e))?;
 
         // 5. Valida tamanho

@@ -665,17 +665,17 @@ impl BehaviorEngine {
         }
     }
 
-    /// Busca na internet por ajuda quando o dicionário não sabe
+    /// Busca no cache local por ajuda quando o dicionário não sabe
     /// Retorna string vazia se não encontrar nada útil
     fn buscar_na_internet(&self, query: &str) -> String {
-        // Tenta buscar em fontes permitidas
+        // Busca no cache local (offline-first)
         let urls = [
             format!("https://doc.rust-lang.org/std/index.html?search={}", query),
             format!("https://docs.rs/reqwest/latest/reqwest/?search={}", query),
         ];
 
         for url in &urls {
-            if let Ok(result) = self.internet.fetch_sync(url) {
+            if let Ok(result) = self.internet.fetch_offline(url) {
                 // Extrai primeira linha útil (ignora HTML)
                 let linha_util = result
                     .content

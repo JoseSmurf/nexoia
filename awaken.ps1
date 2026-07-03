@@ -1,14 +1,10 @@
-# awaken.ps1 — Acorda o NexoIA
-#
+# awaken.ps1 - Acorda o NexoIA
 # Uso: .\awaken.ps1
-# Ou:  NEXOIA_AWAKEN_INTERVAL=60 .\awaken.ps1
 
 $ErrorActionPreference = "Stop"
 
 Write-Host ""
-Write-Host "╔═══════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "║       NexoIA — Despertar                     ║" -ForegroundColor Cyan
-Write-Host "╚═══════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "=== NexoIA - Despertar ===" -ForegroundColor Cyan
 Write-Host ""
 
 # Encontra cargo

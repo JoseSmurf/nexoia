@@ -236,9 +236,7 @@ impl BehaviorEngine {
                         esperado: format!("diagnosticar causa: {}", erro),
                     });
                 }
-                Outcome::NenhumaAcao { motivo }
-                    if motivo.contains("padrão") =>
-                {
+                Outcome::NenhumaAcao { motivo } if motivo.contains("padrão") => {
                     acoes.push(AcaoPlanejada {
                         tipo: "otimizar".into(),
                         parametro: format!("iter_{}", iter.id),

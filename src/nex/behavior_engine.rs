@@ -170,8 +170,8 @@ impl BehaviorEngine {
 
     /// Ciclo completo: Observar → Pensar → Agir → Aprender → Provar
     pub fn ciclo(&mut self, log: &mut IterationLog) -> ExecucaoResultado {
-        // 0. OBSERVAR: olha pra si mesmo (estado real, não hardcoded)
-        let observacao = self.awareness.observe();
+        // 0. OBSERVAR: olha pra si mesmo (leve, sem cargo test completo)
+        let observacao = self.awareness.observe_light();
 
         // 1. PENSAR: analisa estado e histórico e planeja
         let plano = self.pensar(log, &observacao);

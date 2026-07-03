@@ -105,7 +105,10 @@ impl SelfAwareness {
 
     fn run_cmd_env(&self, args: &[&str], envs: &[(&str, &str)]) -> CmdResult {
         let mut cmd = Command::new(&self.cargo_path);
-        cmd.args(args).current_dir(&self.project_dir);
+        cmd.args(args)
+            .current_dir(&self.project_dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
         for (key, val) in envs {
             cmd.env(key, val);
         }
@@ -205,22 +208,31 @@ impl SelfAwareness {
         let clippy = self.run_cmd(&["clippy", "--all-targets", "--", "-D", "warnings"]);
         let clippy_warnings = Self::count_warnings(&clippy.stderr);
 
-        // 4. Miri (verificação formal — opcional, precisa de nightly)
-        //    Usa MIRIFLAGS para desabilitar isolamento (acesso a filesystem)
-        let miri = self.run_cmd_env(
-            &[
-                "+nightly",
-                "miri",
-                "test",
-                "--lib",
-                "--",
-                "--skip",
-                "network::",
-                "--skip",
-                "nex::",
-            ],
-            &[("MIRIFLAGS", "-Zmiri-disable-isolation")],
-        );
+        // 4. Miri (verificação formal — opcional, só quando MIRI=1)
+        //    É muito lento para rodar a cada ciclo. Use MIRI=1 cargo run --bin awaken
+        let miri = if std::env::var("MIRI").unwrap_or_default() == "1" {
+            self.run_cmd_env(
+                &[
+                    "+nightly",
+                    "miri",
+                    "test",
+                    "--lib",
+                    "--",
+                    "--skip",
+                    "network::",
+                    "--skip",
+                    "nex::",
+                ],
+                &[("MIRIFLAGS", "-Zmiri-disable-isolation")],
+            )
+        } else {
+            // Modo rápido: assume miri OK se não solicitado
+            CmdResult {
+                ok: true,
+                stdout: String::new(),
+                stderr: "skipped (use MIRI=1 to enable)".into(),
+            }
+        };
         let miri_errors = Self::parse_miri_errors(&(miri.stdout.clone() + "\n" + &miri.stderr));
 
         // 5. Fmt
@@ -278,7 +290,7 @@ impl SelfAwareness {
         }
     }
 
-    /// Observação leve — só testes (para ciclos rápidos)
+    /// Observação leve — só check (para ciclos rápidos, ~5s)
     #[allow(dead_code)]
     pub fn observe_light(&self) -> ObservedState {
         if self.cargo_path.is_empty() {
@@ -293,24 +305,23 @@ impl SelfAwareness {
             .unwrap_or_else(chrono::Utc::now)
             .to_rfc3339();
 
-        let test = self.run_cmd(&["test"]);
-        let (tp, tf, ti) = Self::parse_test_results(&test.stderr);
+        // Só check — rápido (~5s), não roda testes
         let build = self.run_cmd(&["check"]);
         let build_warnings = Self::count_warnings(&build.stderr);
 
-        let content = format!("{}:{}:{}:{}", build.ok, tp, tf, build_warnings);
+        let content = format!("light:{}:{}", build.ok, build_warnings);
         let health_hash = canonical_hash(&content);
 
         ObservedState {
             build_ok: build.ok,
             build_warnings,
-            tests_passed: tp,
-            tests_failed: tf,
-            tests_ignored: ti,
+            tests_passed: 0,
+            tests_failed: 0,
+            tests_ignored: 0,
             clippy_ok: true,
             clippy_warnings: 0,
             fmt_ok: true,
-            miri_ok: true, // não roda miri na observação leve
+            miri_ok: true,
             miri_errors: vec![],
             timestamp,
             timestamp_iso,

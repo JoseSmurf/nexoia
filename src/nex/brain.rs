@@ -7,7 +7,7 @@
 //! Python, TypeScript, PHP, R, SQL, HTML, CSS, Go, Rust).
 
 use crate::hash::canonical_hash;
-use crate::types::{EvidenceProvider, NexAssertion, EvidenceStrength};
+use crate::types::{EvidenceProvider, EvidenceStrength, NexAssertion};
 use rayon::prelude::*;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -274,9 +274,7 @@ pub struct AIPipeline {
 
 impl AIPipeline {
     pub fn new() -> Self {
-        Self {
-            stages: Vec::new(),
-        }
+        Self { stages: Vec::new() }
     }
     pub fn add(mut self, stage: Box<dyn PipelineStage>) -> Self {
         self.stages.push(stage);
@@ -326,14 +324,15 @@ impl Tensor {
 
     pub fn matmul(&self, other: &Tensor) -> Result<Tensor, BrainError> {
         if self.shape.len() != 2 || other.shape.len() != 2 {
-            return Err(BrainError::InvalidOp(
-                "matmul requer tensores 2D".into(),
-            ));
+            return Err(BrainError::InvalidOp("matmul requer tensores 2D".into()));
         }
         let (m, k) = (self.shape[0], self.shape[1]);
         let (k2, n) = (other.shape[0], other.shape[1]);
         if k != k2 {
-            return Err(BrainError::ShapeMismatch { expected: k, got: k2 });
+            return Err(BrainError::ShapeMismatch {
+                expected: k,
+                got: k2,
+            });
         }
         let mut out = vec![0.0f64; m * n];
         for i in 0..m {
@@ -387,12 +386,7 @@ impl Stats {
     }
 
     pub fn accuracy(preds: &[usize], labels: &[usize]) -> f64 {
-        preds
-            .iter()
-            .zip(labels)
-            .filter(|(p, l)| p == l)
-            .count() as f64
-            / labels.len() as f64
+        preds.iter().zip(labels).filter(|(p, l)| p == l).count() as f64 / labels.len() as f64
     }
 }
 
@@ -570,8 +564,12 @@ impl NexBrain {
         }
         let n = self.inference_log.len();
         let mean = self.inference_log.iter().sum::<f64>() / n as f64;
-        let variance =
-            self.inference_log.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n as f64;
+        let variance = self
+            .inference_log
+            .iter()
+            .map(|x| (x - mean).powi(2))
+            .sum::<f64>()
+            / n as f64;
         let std = variance.sqrt();
         let min = self
             .inference_log
@@ -703,7 +701,9 @@ impl EvidenceProvider for NexBrain {
 
         let context_id = canonical_hash(&format!(
             "{}:{}:{}",
-            output.predicted_class, output.confidence, output.rules_applied.join(",")
+            output.predicted_class,
+            output.confidence,
+            output.rules_applied.join(",")
         ));
 
         Ok(NexAssertion {
@@ -773,8 +773,16 @@ mod tests {
     #[test]
     fn rule_engine_cascade() {
         let engine = RuleEngine::new()
-            .add(10, |ctx| ctx.get("value").copied().unwrap_or(0.0) > 0.8, |_| "high".into())
-            .add(5, |ctx| ctx.get("value").copied().unwrap_or(0.0) > 0.5, |_| "medium".into())
+            .add(
+                10,
+                |ctx| ctx.get("value").copied().unwrap_or(0.0) > 0.8,
+                |_| "high".into(),
+            )
+            .add(
+                5,
+                |ctx| ctx.get("value").copied().unwrap_or(0.0) > 0.5,
+                |_| "medium".into(),
+            )
             .add(1, |_| true, |_| "low".into());
         // Not compiled — rules in insertion order
         let mut ctx: HashMap<String, f64> = HashMap::new();

@@ -46,6 +46,7 @@ impl fmt::Display for NexLayer {
 }
 
 /// Verifica se uma lista de statements requer uma camada específica.
+#[allow(dead_code)]
 pub fn required_layer(statements: &[Stmt]) -> NexLayer {
     let mut max_layer = NexLayer::Basic;
 
@@ -65,6 +66,7 @@ pub fn required_layer(statements: &[Stmt]) -> NexLayer {
 }
 
 /// Verifica se um programa NEX é válido para uma camada dada.
+#[allow(dead_code)]
 pub fn validate_layer(statements: &[Stmt], available: NexLayer) -> Result<(), LayerError> {
     let required = required_layer(statements);
 
@@ -79,6 +81,7 @@ pub fn validate_layer(statements: &[Stmt], available: NexLayer) -> Result<(), La
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum LayerError {
     InsufficientLayer {
         required: NexLayer,

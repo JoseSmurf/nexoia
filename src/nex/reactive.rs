@@ -9,6 +9,7 @@ use std::fmt;
 
 /// Evento que dispara regras reativas.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum NetworkEvent {
     HeartbeatMiss {
         count: u32,
@@ -122,6 +123,7 @@ impl ReactiveEngine {
     }
 
     /// Retorna a camada atual do motor.
+    #[allow(dead_code)]
     pub fn layer(&self) -> NexLayer {
         self.layer
     }
@@ -138,10 +140,12 @@ impl ReactiveEngine {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn rules(&self) -> &[ReactiveRule] {
         &self.rules
     }
 
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.rules.clear();
     }

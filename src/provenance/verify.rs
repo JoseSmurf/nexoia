@@ -14,6 +14,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(dead_code)]
 pub struct VerifyEntry {
     pub decision_id: Uuid,
     pub declared_strength: EvidenceStrength,
@@ -24,16 +25,19 @@ pub struct VerifyEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(dead_code)]
 pub struct VerifyReport {
     pub entries: Vec<VerifyEntry>,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct VerifyError {
     message: String,
 }
 
 impl VerifyError {
+    #[allow(dead_code)]
     fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -50,6 +54,7 @@ impl fmt::Display for VerifyError {
 impl Error for VerifyError {}
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 struct ArtifactSummary {
     path: String,
     hash: String,
@@ -57,6 +62,7 @@ struct ArtifactSummary {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 struct QualityReportArtifact {
     chosen_side: String,
     reason_code: String,
@@ -67,6 +73,7 @@ struct QualityReportArtifact {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 struct DecisionArtifact {
     decision_id: Uuid,
     run_id: Uuid,
@@ -85,6 +92,7 @@ struct DecisionArtifact {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 struct Manifest {
     project: String,
     run_id: Uuid,
@@ -95,6 +103,7 @@ struct Manifest {
     artifacts: Vec<ArtifactSummary>,
 }
 
+#[allow(dead_code)]
 pub fn verify_directory(root: impl AsRef<Path>) -> Result<VerifyReport, VerifyError> {
     let root = root.as_ref();
     let manifest = load_manifest(root)?;
@@ -195,6 +204,7 @@ pub fn verify_directory(root: impl AsRef<Path>) -> Result<VerifyReport, VerifyEr
     Ok(VerifyReport { entries })
 }
 
+#[allow(dead_code)]
 fn load_manifest(root: &Path) -> Result<Manifest, VerifyError> {
     let path = root.join("manifest.json");
     let text = read_required_text(&path)?;
@@ -202,11 +212,13 @@ fn load_manifest(root: &Path) -> Result<Manifest, VerifyError> {
         .map_err(|err| VerifyError::new(format!("failed to parse {}: {}", path.display(), err)))
 }
 
+#[allow(dead_code)]
 fn read_required_text(path: &Path) -> Result<String, VerifyError> {
     fs::read_to_string(path)
         .map_err(|err| VerifyError::new(format!("failed to read {}: {}", path.display(), err)))
 }
 
+#[allow(dead_code)]
 fn read_optional_text(path: &Path) -> Result<Option<String>, VerifyError> {
     match fs::read_to_string(path) {
         Ok(text) => Ok(Some(text)),
@@ -219,6 +231,7 @@ fn read_optional_text(path: &Path) -> Result<Option<String>, VerifyError> {
     }
 }
 
+#[allow(dead_code)]
 fn parse_jsonl<T>(text: &str, label: &str) -> Result<Vec<T>, VerifyError>
 where
     T: for<'de> Deserialize<'de>,
@@ -249,6 +262,7 @@ where
     Ok(items)
 }
 
+#[allow(dead_code)]
 fn parse_optional_jsonl<T>(text: &Option<String>, label: &str) -> Result<Vec<T>, VerifyError>
 where
     T: for<'de> Deserialize<'de>,
@@ -259,6 +273,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 fn validate_manifest_artifact(
     manifest: &Manifest,
     path: &str,
@@ -294,6 +309,7 @@ fn validate_manifest_artifact(
     }
 }
 
+#[allow(dead_code)]
 fn group_evidence_by_decision(
     evidence_records: &[EvidenceRecord],
 ) -> HashMap<String, Vec<EvidenceRecord>> {
@@ -318,6 +334,7 @@ fn group_evidence_by_decision(
     grouped
 }
 
+#[allow(dead_code)]
 fn kind_rank(kind: EvidenceKind) -> u8 {
     match kind {
         EvidenceKind::StateSnapshot => 0,
@@ -325,6 +342,7 @@ fn kind_rank(kind: EvidenceKind) -> u8 {
     }
 }
 
+#[allow(dead_code)]
 fn recompute_chain_strength(chain: &[EvidenceRecord]) -> EvidenceStrength {
     if chain.is_empty() {
         return EvidenceStrength::Unverifiable;
@@ -349,6 +367,7 @@ fn recompute_chain_strength(chain: &[EvidenceRecord]) -> EvidenceStrength {
     walked.chain_strength
 }
 
+#[allow(dead_code)]
 fn evidence_kind_strength(kind: EvidenceKind) -> EvidenceStrength {
     match kind {
         EvidenceKind::StateSnapshot => EvidenceStrength::Signed,
@@ -356,6 +375,7 @@ fn evidence_kind_strength(kind: EvidenceKind) -> EvidenceStrength {
     }
 }
 
+#[allow(dead_code)]
 fn declared_strength(decision: &DecisionArtifact) -> EvidenceStrength {
     match (
         decision.quality_left_strength,

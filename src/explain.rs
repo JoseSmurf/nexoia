@@ -290,6 +290,7 @@ fn build_summary(diagnoses: &[NodeDiagnosis], conflicts: &[ConflictRecord]) -> S
 
 /// Lê decisions.jsonl e retorna Vec<DecisionRecord>.
 /// Cada linha deve ser um JSON válido de DecisionRecord.
+#[allow(dead_code)]
 pub fn load_decisions_jsonl(path: &str) -> Result<Vec<DecisionRecord>, Box<dyn std::error::Error>> {
     use std::fs::File;
     use std::io::{BufRead, BufReader};

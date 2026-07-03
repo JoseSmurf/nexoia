@@ -19,6 +19,7 @@ pub use eval::{
 };
 pub use parser::{parse, ParseError};
 
+#[allow(dead_code)]
 pub fn program_hash<P: Serialize>(program: &P) -> String {
     let canonical = serde_json::to_string(program).expect("serialize program");
     let mut h = Hasher::new();
@@ -27,4 +28,5 @@ pub fn program_hash<P: Serialize>(program: &P) -> String {
 }
 
 pub const NEX_VERSION: &str = "1.0.0";
+#[allow(dead_code)]
 pub const NEX_GRAMMAR_VERSION: u32 = 1;

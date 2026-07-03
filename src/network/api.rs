@@ -252,6 +252,8 @@ fn build_router(state: ApiState) -> Router {
         .route("/epa/:id/verify", post(verify_epa_endpoint))
         .route("/epa/:id/verify-quick", get(verify_quick_endpoint))
         .route("/compliance/:epa_id", get(get_compliance))
+        .route("/verify-chain", get(verify_chain_endpoint))
+        .route("/epa/:id/witness", post(witness_epa_endpoint))
         .route("/titular/:hash/dados", get(titular_dados))
         .route("/titular/:hash/export", get(titular_export))
         .route("/titular/:hash", delete(titular_anonymize))

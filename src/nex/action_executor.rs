@@ -18,12 +18,14 @@ pub struct ExecutionReport {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PeerChange {
     pub peer: String,
     pub change: String,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ReputationChange {
     pub peer: String,
     pub delta: i32,

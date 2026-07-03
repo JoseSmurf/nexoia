@@ -44,5 +44,6 @@ pub struct NexAssertion {
 pub trait EvidenceProvider {
     type Error: std::error::Error;
     fn translate(&self, raw: &str, max_bytes: usize) -> Result<NexAssertion, Self::Error>;
+    #[allow(dead_code)]
     fn fingerprint(&self) -> &str;
 }

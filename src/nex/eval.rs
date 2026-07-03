@@ -75,6 +75,7 @@ pub struct ExecutionResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum EvalError {
     UnknownIdentifier {
         id: String,
@@ -221,6 +222,7 @@ pub fn eval_in_dir<P: AsRef<Path>>(program: Program, base_dir: P) -> Result<Env,
     execute_in_dir(program, base_dir).map(|result| result.env)
 }
 
+#[allow(dead_code)]
 pub fn execute(program: Program) -> Result<ExecutionResult, EvalError> {
     execute_in_dir(program, Path::new("."))
 }
@@ -804,6 +806,7 @@ fn action_decision_id(id: &str, action: Action, required: EvidenceStrength) -> U
     Uuid::new_v5(&Uuid::NAMESPACE_URL, seed.as_bytes())
 }
 
+#[allow(dead_code)]
 pub fn eval_source(source: &str) -> Result<Env, EvalError> {
     let program = super::parse(source).map_err(|err| EvalError::TypeMismatch {
         id: format!("parse-error:{err}"),

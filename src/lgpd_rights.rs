@@ -205,6 +205,7 @@ pub fn create_suppression_epa(node: &NodeIdentity, original_epa: &SharedEPA) -> 
 
 /// Atualiza o índice: reconstrói a partir dos EPAs atuais + manifestos.
 /// Chamado quando temos acesso aos manifests LGPD.
+#[allow(dead_code)]
 pub fn index_from_epas_with_lgpd(
     epas: &[SharedEPA],
     lgpd_map: &HashMap<String, crate::lgpd::LgpdMetadata>,

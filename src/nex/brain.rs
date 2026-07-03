@@ -6,6 +6,8 @@
 //! Padrões sintetizados de 14 linguagens (Rust, Kotlin, C++, Swift, C#,
 //! Python, TypeScript, PHP, R, SQL, HTML, CSS, Go, Rust).
 
+#![allow(dead_code)]
+
 use crate::hash::canonical_hash;
 use crate::types::{EvidenceProvider, EvidenceStrength, NexAssertion};
 use rayon::prelude::*;
@@ -28,6 +30,7 @@ mod rng {
         z ^ (z >> 31)
     }
 
+    #[allow(dead_code)]
     fn xoshiro256ss(s: &mut [u64; 4]) -> u64 {
         let result = s[1].wrapping_mul(5).rotate_left(7).wrapping_mul(9);
         let t = s[1] << 17;
@@ -272,11 +275,18 @@ pub struct AIPipeline {
     stages: Vec<Box<dyn PipelineStage>>,
 }
 
+impl Default for AIPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AIPipeline {
     pub fn new() -> Self {
         Self { stages: Vec::new() }
     }
-    pub fn add(mut self, stage: Box<dyn PipelineStage>) -> Self {
+    #[allow(clippy::should_implement_trait)]
+    pub fn push(mut self, stage: Box<dyn PipelineStage>) -> Self {
         self.stages.push(stage);
         self
     }
@@ -414,12 +424,19 @@ pub struct RuleEngine {
     rules: Vec<NexRule>,
 }
 
+impl Default for RuleEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RuleEngine {
     pub fn new() -> Self {
         Self { rules: Vec::new() }
     }
 
-    pub fn add(
+    #[allow(clippy::should_implement_trait)]
+    pub fn push(
         mut self,
         priority: u8,
         condition: impl Fn(&HashMap<String, f64>) -> bool + Send + Sync + 'static,
@@ -434,7 +451,7 @@ impl RuleEngine {
     }
 
     pub fn compile(&mut self) {
-        self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.rules.sort_by_key(|r| std::cmp::Reverse(r.priority));
     }
 
     pub fn apply(&self, ctx: &HashMap<String, f64>) -> Vec<String> {
@@ -481,22 +498,22 @@ impl NexBrain {
             .collect();
 
         let mut rule_engine = RuleEngine::new()
-            .add(
+            .push(
                 10,
                 |ctx| ctx.contains_key("confidence_high"),
                 |_| "accept_output".into(),
             )
-            .add(
+            .push(
                 7,
                 |ctx| ctx.contains_key("ambiguous"),
                 |_| "request_more_data".into(),
             )
-            .add(
+            .push(
                 4,
                 |ctx| ctx.contains_key("confidence_low"),
                 |_| "flag_for_review".into(),
             )
-            .add(1, |_| true, |_| "log_and_continue".into());
+            .push(1, |_| true, |_| "log_and_continue".into());
         rule_engine.compile();
 
         Self {
@@ -772,18 +789,18 @@ mod tests {
 
     #[test]
     fn rule_engine_cascade() {
-        let engine = RuleEngine::new()
-            .add(
+        let _engine = RuleEngine::new()
+            .push(
                 10,
                 |ctx| ctx.get("value").copied().unwrap_or(0.0) > 0.8,
                 |_| "high".into(),
             )
-            .add(
+            .push(
                 5,
                 |ctx| ctx.get("value").copied().unwrap_or(0.0) > 0.5,
                 |_| "medium".into(),
             )
-            .add(1, |_| true, |_| "low".into());
+            .push(1, |_| true, |_| "low".into());
         // Not compiled — rules in insertion order
         let mut ctx: HashMap<String, f64> = HashMap::new();
         ctx.insert("value".into(), 0.9);

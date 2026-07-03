@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::hash::canonical_hash;
 use crate::types::EvidenceStrength;
 use serde::{Deserialize, Serialize};

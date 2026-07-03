@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::types::EvidenceStrength;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;

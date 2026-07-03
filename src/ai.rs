@@ -219,9 +219,6 @@ fn evaluate_purpose(purpose: &str) -> PurposeQuality {
     }
 }
 
-/// Mantém compatibilidade com código existente.
-pub type MockEngine = EvidenceEngine;
-
 #[cfg(test)]
 mod tests {
     use super::*;

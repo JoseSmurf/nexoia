@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::provenance::typed_node::{
     AnchoredMarker, LocalMarker, Marker, SignedMarker, TypedNode, UnverifiableMarker,
     WitnessedMarker,
@@ -70,6 +68,7 @@ where
     TypedNode::new(node_id, value)
 }
 
+#[allow(dead_code)]
 pub fn derive<U, V, W, S1, S2>(
     left: &TypedNode<U, S1>,
     right: &TypedNode<V, S2>,

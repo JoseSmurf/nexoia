@@ -1,6 +1,6 @@
 // NexoIA — Main entry point
 // Lock order: see GLOBAL LOCK ORDER comment below
-#![allow(dead_code, unused_imports)]
+#![allow(unused_imports)]
 #![allow(clippy::upper_case_acronyms)]
 
 mod ai;
@@ -184,7 +184,7 @@ pub struct NodeContext {
 }
 
 impl NodeContext {
-    fn spawn_tasks(&self) {
+    fn spawn_tasks(&self, checkpoint_rules: &[crate::nex::reactive::ReactiveRule]) {
         tokio::spawn(run_heartbeat_sender(
             self.node.clone(),
             Arc::clone(&self.trusted),
@@ -193,8 +193,16 @@ impl NodeContext {
         ));
         let mut re = crate::nex::reactive::ReactiveEngine::with_layer(NexLayer::Advanced);
 
-        // Tenta carregar regras de arquivo .nex (env NEXOIA_NEX_RULES)
-        if let Ok(nex_path) = std::env::var("NEXOIA_NEX_RULES") {
+        // Prioridade: checkpoint rules > .nex file > defaults
+        if !checkpoint_rules.is_empty() {
+            for rule in checkpoint_rules {
+                let _ = re.add_rule(rule.clone());
+            }
+            println!(
+                "NEX Rules:     Restored {} rules from checkpoint",
+                checkpoint_rules.len()
+            );
+        } else if let Ok(nex_path) = std::env::var("NEXOIA_NEX_RULES") {
             match re.load_from_file(&nex_path) {
                 Ok(count) => {
                     println!("NEX Rules:     Loaded {} rules from {}", count, nex_path);
@@ -309,6 +317,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
             persistence::PersistedData::default()
         }
     };
+
+    // Tenta carregar checkpoint (fecha o ciclo de persistência NEX)
+    let checkpoint_rules: Vec<crate::nex::reactive::ReactiveRule> = {
+        let checkpoint_dir = cfg.data_dir.join("checkpoints");
+        let manager = crate::nex::checkpoint::CheckpointManager::new(checkpoint_dir);
+        match manager.load() {
+            Ok(Some(checkpoint)) => {
+                println!(
+                    "Checkpoint:    Loaded from {} (v{}, {} reactive rules)",
+                    checkpoint.timestamp,
+                    checkpoint.version,
+                    checkpoint.reactive_rules.len()
+                );
+                checkpoint
+                    .reactive_rules
+                    .iter()
+                    .filter_map(|s| s.to_rule())
+                    .collect()
+            }
+            Ok(None) => {
+                println!("Checkpoint:    No checkpoint found (starting fresh)");
+                Vec::new()
+            }
+            Err(e) => {
+                eprintln!("⚠ Checkpoint load failed: {} (starting fresh)", e);
+                Vec::new()
+            }
+        }
+    };
     let eff_max = cfg.max_peers.min(MAX_PEERS);
     let epas: Arc<RwLock<Vec<SharedEPA>>> = Arc::new(RwLock::new(persisted.epas));
     let peers: Arc<RwLock<PeerList>> = Arc::new(RwLock::new(PeerList::from_addrs(
@@ -420,7 +457,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         api_state,
         api_addr,
     };
-    ctx.spawn_tasks();
+    ctx.spawn_tasks(&checkpoint_rules);
     run_pipeline(
         &ctx.node,
         &ctx.peers,
@@ -454,11 +491,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let manager = crate::nex::checkpoint::CheckpointManager::new(checkpoint_dir);
         let network_data = persistence::load_data(&ctx.data_path).unwrap_or_default();
         let checkpoint =
-            crate::nex::checkpoint::create_checkpoint(&ctx.node.node_id, &network_data, &[]);
+            crate::nex::checkpoint::create_checkpoint(&ctx.node.node_id, &network_data, &checkpoint_rules);
         if let Err(e) = manager.save(&checkpoint) {
             eprintln!("Failed to save checkpoint: {}", e);
         } else {
-            println!("Checkpoint saved.");
+            println!("Checkpoint saved ({} reactive rules).", checkpoint_rules.len());
         }
     }
 

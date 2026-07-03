@@ -1,5 +1,6 @@
 pub mod action_executor;
 pub mod ast;
+pub mod brain;
 pub mod checkpoint;
 pub mod eval;
 pub mod layers;

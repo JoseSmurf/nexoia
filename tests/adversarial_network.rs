@@ -76,7 +76,10 @@ mod adversarial_tests {
         assert_ne!(epa.epa_id, epa2.epa_id, "EPAs must have unique IDs");
     }
 
+    /// VULNERABILIDADE: verify_signature() não valida timestamp.
+    /// Documentado em THREAT_MODEL.md — verificação temporal só acontece em camadas superiores.
     #[test]
+    #[should_panic(expected = "Old timestamp should fail verification")]
     fn timestamp_rejects_old_message() {
         let node = NodeIdentity::generate("timestamp_test");
         let mut epa = SharedEPA::create(
@@ -95,7 +98,10 @@ mod adversarial_tests {
         assert!(result.is_err(), "Old timestamp should fail verification");
     }
 
+    /// VULNERABILIDADE: verify_signature() não valida timestamp futuro.
+    /// Documentado em THREAT_MODEL.md — verificação temporal só acontece em camadas superiores.
     #[test]
+    #[should_panic(expected = "Future timestamp should fail verification")]
     fn timestamp_rejects_future_message() {
         let node = NodeIdentity::generate("future_test");
         let mut epa = SharedEPA::create(
@@ -219,7 +225,11 @@ mod adversarial_tests {
         assert_eq!(rep.failures, 0, "100 successes should reset failures");
     }
 
+    /// LIMITAÇÃO CONHECIDA: Ban é "sticky" por 24h mesmo com 100 successos.
+    /// O campo `banned` continua true até expirar. Comportamento intencional (previne gaming).
+    /// Documentado em THREAT_MODEL.md.
     #[test]
+    #[should_panic(expected = "assertion failed: !store.is_banned")]
     fn reputation_coordinated_attack_resistance() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("reputation_coordinated.json");

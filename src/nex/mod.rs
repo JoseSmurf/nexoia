@@ -3,6 +3,7 @@ pub mod ast;
 pub mod behavior_engine;
 pub mod brain;
 pub mod checkpoint;
+pub mod dictionary;
 pub mod eval;
 pub mod feedback_loop;
 pub mod iteration;

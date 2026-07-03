@@ -23,6 +23,8 @@ pub struct ObservedState {
     pub clippy_ok: bool,
     pub clippy_warnings: usize,
     pub fmt_ok: bool,
+    pub miri_ok: bool,
+    pub miri_errors: Vec<String>,
     pub timestamp: u64,
     pub timestamp_iso: String,
     pub health_hash: String,
@@ -44,7 +46,7 @@ impl ObservedState {
     /// O sistema está saudável?
     #[allow(dead_code)]
     pub fn is_healthy(&self) -> bool {
-        self.build_ok && self.tests_failed == 0 && self.clippy_ok && self.fmt_ok
+        self.build_ok && self.tests_failed == 0 && self.clippy_ok && self.fmt_ok && self.miri_ok
     }
 }
 
@@ -154,6 +156,23 @@ impl SelfAwareness {
         (passed, failed, ignored)
     }
 
+    fn parse_miri_errors(output: &str) -> Vec<String> {
+        let mut errors = Vec::new();
+        for line in output.lines() {
+            let trimmed = line.trim();
+            // Miri errors typically start with "error:" or contain "undefined behavior"
+            if trimmed.starts_with("error:")
+                || trimmed.contains("undefined behavior")
+                || trimmed.contains("UndefinedBehavior")
+                || trimmed.contains("memory allocation")
+                || trimmed.contains("stacked borrows")
+            {
+                errors.push(trimmed.to_string());
+            }
+        }
+        errors
+    }
+
     /// O ato de olhar pra si mesmo. Retorna o estado real.
     pub fn observe(&self) -> ObservedState {
         // Modo fake para testes
@@ -181,13 +200,27 @@ impl SelfAwareness {
         let clippy = self.run_cmd(&["clippy", "--all-targets", "--", "-D", "warnings"]);
         let clippy_warnings = Self::count_warnings(&clippy.stderr);
 
-        // 4. Fmt
+        // 4. Miri (verificação formal — opcional, precisa de nightly)
+        let miri = self.run_cmd(&[
+            "+nightly",
+            "miri",
+            "test",
+            "--lib",
+            "--",
+            "--skip",
+            "network::",
+            "--skip",
+            "nex::",
+        ]);
+        let miri_errors = Self::parse_miri_errors(&miri.stderr);
+
+        // 5. Fmt
         let fmt = self.run_cmd(&["fmt", "--check"]);
 
         // Calcula hash de saúde — prova do estado observado
         let content = format!(
-            "{}:{}:{}:{}:{}:{}:{}",
-            build.ok, build_warnings, tp, tf, clippy.ok, clippy_warnings, fmt.ok
+            "{}:{}:{}:{}:{}:{}:{}:{}",
+            build.ok, build_warnings, tp, tf, clippy.ok, clippy_warnings, fmt.ok, miri.ok
         );
         let health_hash = canonical_hash(&content);
 
@@ -200,6 +233,8 @@ impl SelfAwareness {
             clippy_ok: clippy.ok,
             clippy_warnings,
             fmt_ok: fmt.ok,
+            miri_ok: miri.ok,
+            miri_errors,
             timestamp,
             timestamp_iso,
             health_hash,
@@ -215,7 +250,7 @@ impl SelfAwareness {
         let timestamp_iso = chrono::DateTime::from_timestamp(timestamp as i64, 0)
             .unwrap_or_else(chrono::Utc::now)
             .to_rfc3339();
-        let content = format!("fake:{}:0:0:true:0:true", timestamp);
+        let content = format!("fake:{}:0:0:true:0:true:true", timestamp);
         let health_hash = canonical_hash(&content);
         ObservedState {
             build_ok: true,
@@ -226,6 +261,8 @@ impl SelfAwareness {
             clippy_ok: true,
             clippy_warnings: 0,
             fmt_ok: true,
+            miri_ok: true,
+            miri_errors: vec![],
             timestamp,
             timestamp_iso,
             health_hash,
@@ -261,9 +298,11 @@ impl SelfAwareness {
             tests_passed: tp,
             tests_failed: tf,
             tests_ignored: ti,
-            clippy_ok: true, // não roda clippy na observação leve
+            clippy_ok: true,
             clippy_warnings: 0,
-            fmt_ok: true, // não roda fmt na observação leve
+            fmt_ok: true,
+            miri_ok: true, // não roda miri na observação leve
+            miri_errors: vec![],
             timestamp,
             timestamp_iso,
             health_hash,
@@ -295,6 +334,8 @@ mod tests {
             clippy_ok: true,
             clippy_warnings: 2,
             fmt_ok: true,
+            miri_ok: true,
+            miri_errors: vec![],
             timestamp: 0,
             timestamp_iso: String::new(),
             health_hash: "abc".into(),
@@ -317,6 +358,8 @@ mod tests {
             clippy_ok: true,
             clippy_warnings: 0,
             fmt_ok: true,
+            miri_ok: true,
+            miri_errors: vec![],
             timestamp: 0,
             timestamp_iso: String::new(),
             health_hash: "abc".into(),
@@ -335,6 +378,8 @@ mod tests {
             clippy_ok: true,
             clippy_warnings: 0,
             fmt_ok: true,
+            miri_ok: false,
+            miri_errors: vec!["undefined behavior detected".into()],
             timestamp: 0,
             timestamp_iso: String::new(),
             health_hash: "abc".into(),

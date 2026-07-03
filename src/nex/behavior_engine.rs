@@ -8,6 +8,7 @@
 //! "O motor nunca muda. O comportamento muda o tempo inteiro."
 
 use crate::hash::canonical_hash;
+use crate::nex::dictionary::{Dictionary, EntryCategory};
 use crate::nex::feedback_loop::{FeedbackLoop, FeedbackResult};
 use crate::nex::iteration::{Action, IterationLog, Outcome};
 use crate::nex::self_awareness::{ObservedState, SelfAwareness};
@@ -70,6 +71,7 @@ pub struct BehaviorEngine {
     knowledge: Knowledge,
     feedback: FeedbackLoop,
     awareness: SelfAwareness,
+    dictionary: Dictionary,
 }
 
 impl BehaviorEngine {
@@ -78,12 +80,14 @@ impl BehaviorEngine {
         fs::create_dir_all(&knowledge_dir).ok();
 
         let knowledge = Self::carregar_knowledge(&knowledge_dir);
+        let dictionary = Dictionary::load(&knowledge_dir);
 
         Self {
             knowledge_dir,
             knowledge,
             feedback: FeedbackLoop::new(),
             awareness: SelfAwareness::new(project_dir.to_path_buf()),
+            dictionary,
         }
     }
 
@@ -94,12 +98,14 @@ impl BehaviorEngine {
         fs::create_dir_all(&knowledge_dir).ok();
 
         let knowledge = Self::carregar_knowledge(&knowledge_dir);
+        let dictionary = Dictionary::load(&knowledge_dir);
 
         Self {
             knowledge_dir,
             knowledge,
             feedback: FeedbackLoop::new(),
             awareness: SelfAwareness::fake(),
+            dictionary,
         }
     }
 
@@ -176,6 +182,9 @@ impl BehaviorEngine {
         // 5. Salva conhecimento
         self.salvar_knowledge();
 
+        // 6. Salva dicionário vivo (aprendizado persistente)
+        let _ = self.dictionary.save();
+
         let content = format!(
             "{}:{}:{}:{}:{}:{}",
             plano.hash,
@@ -197,17 +206,50 @@ impl BehaviorEngine {
         }
     }
 
-    /// PENSAR: analisa estado observado + histórico e gera plano
+    /// PENSAR: analisa estado observado + histórico + dicionário e gera plano
     fn pensar(&self, log: &IterationLog, observacao: &ObservedState) -> Plano {
         let historico = log.todas();
         let mut acoes = Vec::new();
 
+        // Se Miri falhou — prioridade MÁXIMA: erro de segurança formal
+        if !observacao.miri_ok {
+            let dicas: Vec<String> = observacao
+                .miri_errors
+                .iter()
+                .map(|e| {
+                    // Busca no dicionário por erros similares
+                    let resultados = self.dictionary.lookup(e);
+                    if let Some(dica) = resultados.first() {
+                        format!("{} → {}", e, dica.suggestion)
+                    } else {
+                        e.clone()
+                    }
+                })
+                .collect();
+            acoes.push(AcaoPlanejada {
+                tipo: "corrigir_seguranca".into(),
+                parametro: "miri".into(),
+                esperado: if dicas.is_empty() {
+                    "Miri detectou erro de segurança — investigar".into()
+                } else {
+                    format!("Miri: {} — dicas: {}", dicas.join("; "), dicas.len())
+                },
+            });
+        }
+
         // Se o build quebrou, prioridade máxima: investigar
         if !observacao.build_ok {
+            // Consulta dicionário por sugestões
+            let dicas = self.dictionary.lookup("build");
+            let sugestao = if let Some(dica) = dicas.first() {
+                format!("build falhou — dica: {}", dica.suggestion)
+            } else {
+                "build falhou — corrigir imediatamente".into()
+            };
             acoes.push(AcaoPlanejada {
                 tipo: "corrigir_build".into(),
                 parametro: "build".into(),
-                esperado: "build falhou — corrigir imediatamente".into(),
+                esperado: sugestao,
             });
         }
 
@@ -220,15 +262,30 @@ impl BehaviorEngine {
             });
         }
 
-        // Se há warnings, tentar limpar
+        // Se há warnings, tentar limpar (com dicas do dicionário)
         if observacao.build_warnings + observacao.clippy_warnings > 0 {
+            let dicas = self.dictionary.lookup("clippy");
+            let sugestao = if !dicas.is_empty() {
+                let dicas_str: Vec<&str> = dicas
+                    .iter()
+                    .take(3)
+                    .map(|d| d.suggestion.as_str())
+                    .collect();
+                format!(
+                    "{} warnings — dicas: {}",
+                    observacao.build_warnings + observacao.clippy_warnings,
+                    dicas_str.join("; ")
+                )
+            } else {
+                format!(
+                    "{} warnings (build) + {} warnings (clippy)",
+                    observacao.build_warnings, observacao.clippy_warnings
+                )
+            };
             acoes.push(AcaoPlanejada {
                 tipo: "limpar_warnings".into(),
                 parametro: "warnings".into(),
-                esperado: format!(
-                    "{} warnings (build) + {} warnings (clippy)",
-                    observacao.build_warnings, observacao.clippy_warnings
-                ),
+                esperado: sugestao,
             });
         }
 
@@ -273,13 +330,15 @@ impl BehaviorEngine {
         }
 
         let justificativa = format!(
-            "Estado observado: build={}, tests={}/{}, warnings={}, clippy={}, fmt={} | {} iterações analisadas → {} ações planejadas",
+            "Estado: build={}, tests={}/{}, warnings={}, clippy={}, fmt={}, miri={} | Dicionário: {} entradas | {} iterações → {} ações",
             if observacao.build_ok { "OK" } else { "FALHOU" },
             observacao.tests_passed,
             observacao.tests_failed,
             observacao.build_warnings + observacao.clippy_warnings,
             if observacao.clippy_ok { "OK" } else { "FALHOU" },
             if observacao.fmt_ok { "OK" } else { "FALHOU" },
+            if observacao.miri_ok { "OK" } else { "FALHOU" },
+            self.dictionary.len(),
             recentes.len(),
             acoes.len()
         );
@@ -414,9 +473,50 @@ impl BehaviorEngine {
     }
 
     /// APRENDER: atualiza conhecimento baseado no resultado
+    /// Alimenta o dicionário vivo com padrões aprendidos
     fn aprender(&mut self, execucao: &ExecucaoResultado, feedback: &FeedbackResult) {
         self.knowledge.iteracoes += 1;
         self.knowledge.ultimo_hash = execucao.hash.clone();
+
+        // Alimenta o dicionário vivo: padrões bem-sucedidos → Verified
+        if feedback.score > 0.7 && !feedback.motivo.is_empty() {
+            use crate::nex::dictionary::{DictionaryEntry, KnowledgeLevel};
+
+            self.dictionary.learn(DictionaryEntry {
+                id: format!("learned_{}", self.knowledge.iteracoes),
+                category: EntryCategory::Learned,
+                level: KnowledgeLevel::Verified,
+                pattern: feedback.motivo.clone(),
+                description: format!(
+                    "Ação bem-sucedida (score={:.2}, {}/{} OK)",
+                    feedback.score, execucao.acoes_bem_sucedidas, execucao.acoes_executadas
+                ),
+                suggestion: feedback.motivo.clone(),
+                confidence: feedback.score,
+                miri_passed: true,
+                occurrences: 1,
+            });
+        }
+
+        // Se padrões novos foram detectados, registra como Hypothese
+        if feedback.padroes_novos > 0 {
+            use crate::nex::dictionary::{DictionaryEntry, KnowledgeLevel};
+
+            self.dictionary.learn(DictionaryEntry {
+                id: format!("pattern_{}", self.knowledge.iteracoes),
+                category: EntryCategory::Learned,
+                level: KnowledgeLevel::Hypothese,
+                pattern: format!("padrão detectado na iteração {}", self.knowledge.iteracoes),
+                description: format!(
+                    "Novo padrão identificado ({} padrões novos, score={:.2})",
+                    feedback.padroes_novos, feedback.score
+                ),
+                suggestion: "Monitorar e coletar mais evidências".into(),
+                confidence: 0.5,
+                miri_passed: false,
+                occurrences: 1,
+            });
+        }
 
         // Atualiza métricas
         self.knowledge
@@ -455,8 +555,9 @@ impl BehaviorEngine {
     /// Resumo do Behavior Engine
     #[allow(dead_code)]
     pub fn resumo(&self) -> String {
+        let dict = self.dictionary.stats();
         format!(
-            "iterações={}, regras={}, score={:.4}, último_hash={}",
+            "iterações={}, regras={}, score={:.4}, último_hash={}, dicionário={}",
             self.knowledge.iteracoes,
             self.knowledge.regras.len(),
             self.knowledge
@@ -464,7 +565,8 @@ impl BehaviorEngine {
                 .get("score_atual")
                 .copied()
                 .unwrap_or(0.0),
-            &self.knowledge.ultimo_hash[..16.min(self.knowledge.ultimo_hash.len())]
+            &self.knowledge.ultimo_hash[..16.min(self.knowledge.ultimo_hash.len())],
+            dict
         )
     }
 }

@@ -23,6 +23,7 @@ pub struct FeedbackResult {
     #[allow(dead_code)]
     pub ajustes_aplicados: usize,
     pub score: f64,
+    pub motivo: String,
     #[allow(dead_code)]
     pub hash: String,
 }
@@ -140,6 +141,13 @@ impl FeedbackLoop {
             ajustes_sugeridos,
             ajustes_aplicados,
             score,
+            motivo: if ajustes_aplicados > 0 {
+                format!("{} ajustes aplicados", ajustes_aplicados)
+            } else if padroes_novos > 0 {
+                format!("{} padrões detectados", padroes_novos)
+            } else {
+                "nenhuma mudança".into()
+            },
             hash,
         }
     }

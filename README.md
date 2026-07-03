@@ -272,6 +272,17 @@ env vars → State.lgpd → Pipeline → SharedEPA(lgpd_metadata)
                               DELETE /titular/:hash → anonimiza → EPA supressão
 ```
 
+### Caso de Uso Completo: Direito ao Esquecimento
+
+O arquivo `tests/lgpd_e2e_use_case.rs` demonstra o fluxo completo de exclusão (LGPD Art. 18, VI) com dados realistas — de criação do EPA até a prova matemática de exclusão verificável por terceiro.
+
+Para rodar e verificar:
+```bash
+cargo test lgpd_direito_ao_esquecimento_fluxo_completo -- --nocapture
+```
+
+Documentação completa: `docs/LGPD_E2E_USE_CASE.md`
+
 ## Linguagem NEX
 
 DSL tipada para nós de evidência com 3 camadas:
@@ -297,7 +308,7 @@ on reputation_below 0.3 → mark_inactive peer
 cargo test
 ```
 
-**Resultado verificado em 2026-07-03:** 940 testes, 0 falhas, 2 ignorados, 0 warnings (`cargo build --release 2>&1 | grep warning` retorna vazio).
+**Resultado verificado em 2026-07-03:** 942 testes, 0 falhas, 2 ignorados, 0 warnings (`cargo build --release 2>&1 | grep warning` retorna vazio).
 
 Comando para verificação independente:
 ```bash

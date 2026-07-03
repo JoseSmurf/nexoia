@@ -3,12 +3,15 @@ pub mod ast;
 pub mod brain;
 pub mod checkpoint;
 pub mod eval;
+pub mod feedback_loop;
 pub mod iteration;
 pub mod layers;
 pub mod manifesto;
 pub mod observer;
 pub mod parser;
+pub mod pattern_detector;
 pub mod reactive;
+pub mod rule_adjuster;
 
 use blake3::Hasher;
 use serde::Serialize;

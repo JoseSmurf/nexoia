@@ -155,8 +155,8 @@ impl SelfAwareness {
             .unwrap_or_else(chrono::Utc::now)
             .to_rfc3339();
 
-        // 1. Build
-        let build = self.run_cmd(&["build"]);
+        // 1. Check (mais leve que build, não gera binários)
+        let build = self.run_cmd(&["check"]);
         let build_warnings = Self::count_warnings(&build.stderr);
 
         // 2. Test
@@ -205,7 +205,7 @@ impl SelfAwareness {
 
         let test = self.run_cmd(&["test"]);
         let (tp, tf, ti) = Self::parse_test_results(&test.stderr);
-        let build = self.run_cmd(&["build"]);
+        let build = self.run_cmd(&["check"]);
         let build_warnings = Self::count_warnings(&build.stderr);
 
         let content = format!("{}:{}:{}:{}", build.ok, tp, tf, build_warnings);

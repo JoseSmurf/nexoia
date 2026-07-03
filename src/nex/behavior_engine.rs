@@ -10,6 +10,7 @@
 use crate::hash::canonical_hash;
 use crate::nex::dictionary::{Dictionary, EntryCategory};
 use crate::nex::feedback_loop::{FeedbackLoop, FeedbackResult};
+use crate::nex::internet::InternetFetcher;
 use crate::nex::iteration::{Action, IterationLog, Outcome};
 use crate::nex::self_awareness::{ObservedState, SelfAwareness};
 use serde::{Deserialize, Serialize};
@@ -72,6 +73,7 @@ pub struct BehaviorEngine {
     feedback: FeedbackLoop,
     awareness: SelfAwareness,
     dictionary: Dictionary,
+    internet: InternetFetcher,
 }
 
 impl BehaviorEngine {
@@ -81,6 +83,7 @@ impl BehaviorEngine {
 
         let knowledge = Self::carregar_knowledge(&knowledge_dir);
         let dictionary = Dictionary::load(&knowledge_dir);
+        let internet = InternetFetcher::new(data_dir);
 
         Self {
             knowledge_dir,
@@ -88,6 +91,7 @@ impl BehaviorEngine {
             feedback: FeedbackLoop::new(),
             awareness: SelfAwareness::new(project_dir.to_path_buf()),
             dictionary,
+            internet,
         }
     }
 
@@ -99,6 +103,7 @@ impl BehaviorEngine {
 
         let knowledge = Self::carregar_knowledge(&knowledge_dir);
         let dictionary = Dictionary::load(&knowledge_dir);
+        let internet = InternetFetcher::new_fake(data_dir);
 
         Self {
             knowledge_dir,
@@ -106,6 +111,7 @@ impl BehaviorEngine {
             feedback: FeedbackLoop::new(),
             awareness: SelfAwareness::fake(),
             dictionary,
+            internet,
         }
     }
 
@@ -177,7 +183,7 @@ impl BehaviorEngine {
         let feedback = self.feedback.executar(log);
 
         // 4. APRENDER: atualiza conhecimento
-        self.aprender(&execucao, &feedback);
+        self.aprender(&execucao, &feedback, &observacao);
 
         // 5. Salva conhecimento
         self.salvar_knowledge();
@@ -206,7 +212,7 @@ impl BehaviorEngine {
         }
     }
 
-    /// PENSAR: analisa estado observado + histórico + dicionário e gera plano
+    /// PENSAR: analisa estado observado + histórico + dicionário + internet e gera plano
     fn pensar(&self, log: &IterationLog, observacao: &ObservedState) -> Plano {
         let historico = log.todas();
         let mut acoes = Vec::new();
@@ -222,7 +228,13 @@ impl BehaviorEngine {
                     if let Some(dica) = resultados.first() {
                         format!("{} → {}", e, dica.suggestion)
                     } else {
-                        e.clone()
+                        // Busca na internet se dicionário não sabe
+                        let internet_dica = self.buscar_na_internet(e);
+                        if !internet_dica.is_empty() {
+                            format!("{} → [internet] {}", e, internet_dica)
+                        } else {
+                            e.clone()
+                        }
                     }
                 })
                 .collect();
@@ -244,7 +256,13 @@ impl BehaviorEngine {
             let sugestao = if let Some(dica) = dicas.first() {
                 format!("build falhou — dica: {}", dica.suggestion)
             } else {
-                "build falhou — corrigir imediatamente".into()
+                // Busca na internet
+                let internet_dica = self.buscar_na_internet("rust build error");
+                if !internet_dica.is_empty() {
+                    format!("build falhou — [internet] {}", internet_dica)
+                } else {
+                    "build falhou — corrigir imediatamente".into()
+                }
             };
             acoes.push(AcaoPlanejada {
                 tipo: "corrigir_build".into(),
@@ -255,10 +273,19 @@ impl BehaviorEngine {
 
         // Se testes falharam, investigar
         if observacao.tests_failed > 0 {
+            let dicas = self.dictionary.lookup("test");
+            let sugestao = if let Some(dica) = dicas.first() {
+                format!(
+                    "{} testes falharam — dica: {}",
+                    observacao.tests_failed, dica.suggestion
+                )
+            } else {
+                format!("{} testes falharam", observacao.tests_failed)
+            };
             acoes.push(AcaoPlanejada {
                 tipo: "corrigir_testes".into(),
                 parametro: "tests".into(),
-                esperado: format!("{} testes falharam", observacao.tests_failed),
+                esperado: sugestao,
             });
         }
 
@@ -295,6 +322,28 @@ impl BehaviorEngine {
                 tipo: "formatar".into(),
                 parametro: "fmt".into(),
                 esperado: "cargo fmt --check falhou".into(),
+            });
+        }
+
+        // Se Miri passou — registrar como conhecimento verificado
+        if observacao.miri_ok && !observacao.miri_errors.is_empty() {
+            // Miri passou mas teve warnings — registra como tested
+            acoes.push(AcaoPlanejada {
+                tipo: "verificar_miri".into(),
+                parametro: "miri".into(),
+                esperado: format!(
+                    "Miri passou com {} warnings — considerar promoted",
+                    observacao.miri_errors.len()
+                ),
+            });
+        }
+
+        // Se tudo está OK, monitora e registra sucesso
+        if acoes.is_empty() {
+            acoes.push(AcaoPlanejada {
+                tipo: "monitorar".into(),
+                parametro: "sistema".into(),
+                esperado: "sistema saudável — continuar observando".into(),
             });
         }
 
@@ -472,9 +521,14 @@ impl BehaviorEngine {
         }
     }
 
-    /// APRENDER: atualiza conhecimento baseado no resultado
+    /// APRENDER: atualiza conhecimento baseado no resultado + estado observado
     /// Alimenta o dicionário vivo com padrões aprendidos
-    fn aprender(&mut self, execucao: &ExecucaoResultado, feedback: &FeedbackResult) {
+    fn aprender(
+        &mut self,
+        execucao: &ExecucaoResultado,
+        feedback: &FeedbackResult,
+        observacao: &ObservedState,
+    ) {
         self.knowledge.iteracoes += 1;
         self.knowledge.ultimo_hash = execucao.hash.clone();
 
@@ -518,6 +572,71 @@ impl BehaviorEngine {
             });
         }
 
+        // Aprende com o estado observado: testes, clippy, miri
+        use crate::nex::dictionary::{DictionaryEntry, KnowledgeLevel};
+
+        // Testes passando → conhecimento verified
+        if observacao.tests_passed > 0 && observacao.tests_failed == 0 {
+            self.dictionary.learn(DictionaryEntry {
+                id: "tests_passing".into(),
+                category: EntryCategory::Rust,
+                level: KnowledgeLevel::Verified,
+                pattern: "cargo test passa".into(),
+                description: format!("{} testes passando, 0 falhando", observacao.tests_passed),
+                suggestion: "Sistema de testes estável".into(),
+                confidence: 1.0,
+                miri_passed: observacao.miri_ok,
+                occurrences: observacao.tests_passed,
+            });
+        }
+
+        // Clippy limpo → padrão Rust conhecido
+        if observacao.clippy_ok && observacao.clippy_warnings == 0 {
+            self.dictionary.learn(DictionaryEntry {
+                id: "clippy_clean".into(),
+                category: EntryCategory::Rust,
+                level: KnowledgeLevel::Verified,
+                pattern: "clippy sem warnings".into(),
+                description: "Cargo clippy passa sem warnings".into(),
+                suggestion: "Código segue boas práticas Rust".into(),
+                confidence: 1.0,
+                miri_passed: observacao.miri_ok,
+                occurrences: 1,
+            });
+        }
+
+        // Miri passou → conhecimento formal verificado
+        if observacao.miri_ok && observacao.miri_errors.is_empty() {
+            self.dictionary.learn(DictionaryEntry {
+                id: "miri_verified".into(),
+                category: EntryCategory::Rust,
+                level: KnowledgeLevel::Verified,
+                pattern: "miri formal verification passed".into(),
+                description: "Miri verificou ausência de undefined behavior".into(),
+                suggestion: "Código é formalmente seguro (sem UB)".into(),
+                confidence: 1.0,
+                miri_passed: true,
+                occurrences: 1,
+            });
+        }
+
+        // Miri com erros → hipótese de bug de segurança
+        if !observacao.miri_ok && !observacao.miri_errors.is_empty() {
+            for (i, erro) in observacao.miri_errors.iter().take(3).enumerate() {
+                self.dictionary.learn(DictionaryEntry {
+                    id: format!("miri_error_{}_{}", self.knowledge.iteracoes, i),
+                    category: EntryCategory::Rust,
+                    level: KnowledgeLevel::Hypothese,
+                    pattern: erro.clone(),
+                    description: format!("Miri detectou: {}", erro),
+                    suggestion: "Investigar e corrigir comportamento indefinido".into(),
+                    confidence: 0.3,
+                    miri_passed: false,
+                    occurrences: 1,
+                });
+            }
+        }
+
         // Atualiza métricas
         self.knowledge
             .metricas
@@ -544,6 +663,35 @@ impl BehaviorEngine {
                 }
             }
         }
+    }
+
+    /// Busca na internet por ajuda quando o dicionário não sabe
+    /// Retorna string vazia se não encontrar nada útil
+    fn buscar_na_internet(&self, query: &str) -> String {
+        // Tenta buscar em fontes permitidas
+        let urls = [
+            format!("https://doc.rust-lang.org/std/index.html?search={}", query),
+            format!("https://docs.rs/reqwest/latest/reqwest/?search={}", query),
+        ];
+
+        for url in &urls {
+            if let Ok(result) = self.internet.fetch_sync(url) {
+                // Extrai primeira linha útil (ignora HTML)
+                let linha_util = result
+                    .content
+                    .lines()
+                    .filter(|l| !l.starts_with('<') && !l.is_empty())
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                if !linha_util.is_empty() && linha_util.len() > 10 {
+                    return linha_util;
+                }
+            }
+        }
+
+        String::new()
     }
 
     /// Estado atual do conhecimento

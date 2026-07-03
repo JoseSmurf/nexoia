@@ -54,7 +54,7 @@ impl ObservedState {
 #[derive(Debug, Clone)]
 struct CmdResult {
     ok: bool,
-    _stdout: String,
+    stdout: String,
     stderr: String,
 }
 
@@ -100,19 +100,24 @@ impl SelfAwareness {
     }
 
     fn run_cmd(&self, args: &[&str]) -> CmdResult {
-        match Command::new(&self.cargo_path)
-            .args(args)
-            .current_dir(&self.project_dir)
-            .output()
-        {
+        self.run_cmd_env(args, &[])
+    }
+
+    fn run_cmd_env(&self, args: &[&str], envs: &[(&str, &str)]) -> CmdResult {
+        let mut cmd = Command::new(&self.cargo_path);
+        cmd.args(args).current_dir(&self.project_dir);
+        for (key, val) in envs {
+            cmd.env(key, val);
+        }
+        match cmd.output() {
             Ok(output) => CmdResult {
                 ok: output.status.success(),
-                _stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
                 stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             },
             Err(e) => CmdResult {
                 ok: false,
-                _stdout: String::new(),
+                stdout: String::new(),
                 stderr: format!("exec error: {e}"),
             },
         }
@@ -192,27 +197,31 @@ impl SelfAwareness {
         let build = self.run_cmd(&["check"]);
         let build_warnings = Self::count_warnings(&build.stderr);
 
-        // 2. Test
+        // 2. Test — parseia stdout E stderr (cargo pode enviar "test result:" para qualquer uma)
         let test = self.run_cmd(&["test"]);
-        let (tp, tf, ti) = Self::parse_test_results(&test.stderr);
+        let (tp, tf, ti) = Self::parse_test_results(&(test.stdout.clone() + "\n" + &test.stderr));
 
         // 3. Clippy
         let clippy = self.run_cmd(&["clippy", "--all-targets", "--", "-D", "warnings"]);
         let clippy_warnings = Self::count_warnings(&clippy.stderr);
 
         // 4. Miri (verificação formal — opcional, precisa de nightly)
-        let miri = self.run_cmd(&[
-            "+nightly",
-            "miri",
-            "test",
-            "--lib",
-            "--",
-            "--skip",
-            "network::",
-            "--skip",
-            "nex::",
-        ]);
-        let miri_errors = Self::parse_miri_errors(&miri.stderr);
+        //    Usa MIRIFLAGS para desabilitar isolamento (acesso a filesystem)
+        let miri = self.run_cmd_env(
+            &[
+                "+nightly",
+                "miri",
+                "test",
+                "--lib",
+                "--",
+                "--skip",
+                "network::",
+                "--skip",
+                "nex::",
+            ],
+            &[("MIRIFLAGS", "-Zmiri-disable-isolation")],
+        );
+        let miri_errors = Self::parse_miri_errors(&(miri.stdout.clone() + "\n" + &miri.stderr));
 
         // 5. Fmt
         let fmt = self.run_cmd(&["fmt", "--check"]);

@@ -52,6 +52,7 @@ impl ObservedState {
 
 /// Resultado de um comando cargo
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct CmdResult {
     ok: bool,
     stdout: String,
@@ -130,6 +131,7 @@ impl SelfAwareness {
         output.lines().filter(|l| l.contains("warning:")).count()
     }
 
+    #[allow(dead_code)]
     fn parse_test_results(output: &str) -> (usize, usize, usize) {
         let mut passed = 0usize;
         let mut failed = 0usize;
@@ -164,6 +166,7 @@ impl SelfAwareness {
         (passed, failed, ignored)
     }
 
+    #[allow(dead_code)]
     fn parse_miri_errors(output: &str) -> Vec<String> {
         let mut errors = Vec::new();
         for line in output.lines() {
@@ -182,6 +185,8 @@ impl SelfAwareness {
     }
 
     /// O ato de olhar pra si mesmo. Retorna o estado real.
+    /// Usado pelo awaken binary para primeira observação completa.
+    #[allow(dead_code)]
     pub fn observe(&self) -> ObservedState {
         // Modo fake para testes
         if self.cargo_path.is_empty() {

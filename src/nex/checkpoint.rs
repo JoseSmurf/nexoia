@@ -156,6 +156,7 @@ pub fn create_checkpoint(
 }
 
 /// Aplica checkpoint ao estado do sistema.
+#[allow(dead_code)]
 pub fn apply_checkpoint(
     checkpoint: &Checkpoint,
     network_data: &mut PersistedData,

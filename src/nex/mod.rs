@@ -3,6 +3,7 @@ pub mod ast;
 pub mod brain;
 pub mod checkpoint;
 pub mod eval;
+pub mod iteration;
 pub mod layers;
 pub mod manifesto;
 pub mod observer;

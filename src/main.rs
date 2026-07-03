@@ -490,12 +490,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let checkpoint_dir = ctx.cfg.data_dir.join("checkpoints");
         let manager = crate::nex::checkpoint::CheckpointManager::new(checkpoint_dir);
         let network_data = persistence::load_data(&ctx.data_path).unwrap_or_default();
-        let checkpoint =
-            crate::nex::checkpoint::create_checkpoint(&ctx.node.node_id, &network_data, &checkpoint_rules);
+        let checkpoint = crate::nex::checkpoint::create_checkpoint(
+            &ctx.node.node_id,
+            &network_data,
+            &checkpoint_rules,
+        );
         if let Err(e) = manager.save(&checkpoint) {
             eprintln!("Failed to save checkpoint: {}", e);
         } else {
-            println!("Checkpoint saved ({} reactive rules).", checkpoint_rules.len());
+            println!(
+                "Checkpoint saved ({} reactive rules).",
+                checkpoint_rules.len()
+            );
         }
     }
 

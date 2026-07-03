@@ -48,3 +48,7 @@ path = "src/bin/verify.rs"
 [[bin]]
 name = "nex"
 path = "src/bin/nex.rs"
+
+[[bin]]
+name = "daemon"
+path = "src/bin/daemon.rs"

@@ -1,0 +1,15 @@
+{
+  "timestamp": 1783088725,
+  "timestamp_iso": "2026-07-03T14:25:25+00:00",
+  "project": "nexoia",
+  "build_ok": false,
+  "build_warnings": 1,
+  "tests_passed": 0,
+  "tests_failed": 0,
+  "tests_ignored": 0,
+  "clippy_ok": false,
+  "clippy_warnings": 1,
+  "fmt_ok": false,
+  "healthy": false,
+  "overall_hash": "7688f0ea891bcd23ff839d424f413e2411f6a5a823bb8d81fa3dfc46f0f1e34d"
+}

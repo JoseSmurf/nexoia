@@ -297,13 +297,20 @@ on reputation_below 0.3 → mark_inactive peer
 cargo test
 ```
 
-**Resultado verificado em 2026-07-03:** 921 testes, 0 falhas, 1 ignorado, 0 warnings (`cargo build --release 2>&1 | grep warning` retorna vazio).
+**Resultado verificado em 2026-07-03:** 940 testes, 0 falhas, 2 ignorados, 0 warnings (`cargo build --release 2>&1 | grep warning` retorna vazio).
 
 Comando para verificação independente:
 ```bash
 cargo test 2>&1 | grep "test result:"
 cargo build --release 2>&1 | grep warning
 ```
+
+## Roadmap
+
+Visão de longo prazo — itens registrados como intenção, não trabalho em andamento. Ver `ROADMAP.md` para detalhes.
+
+- **Fase 5:** EPA Verifier — crate standalone mínimo para verificação por terceiros
+- **Fase 6:** Agente de manutenção assistida por IA com supervisão humana obrigatória
 
 ## Licença
 

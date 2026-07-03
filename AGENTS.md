@@ -22,7 +22,7 @@ Não é log. Não é auditoria. É **prova**. Qualquer pessoa verifica sem confi
 
 ## Estado Atual
 
-- 921 testes verdes (incluindo LGPD Nível 2) — verificado em 2026-07-03 com `cargo test 2>&1 | grep "test result:"`
+- 940 testes verdes (incluindo LGPD Nível 2) — verificado em 2026-07-03 com `cargo test 2>&1 | grep "test result:"`
 - LGPD Nível 1 (metadata) + Nível 2 (direitos do titular) implementados
 - 4 endpoints LGPD: `GET /titular/:hash/dados`, `GET /titular/:hash/export`, `DELETE /titular/:hash`, `POST /titular/:hash/revogar`
 - Pipeline → LGPD Index conectado automaticamente
@@ -384,7 +384,7 @@ x25519-dalek, rusqlite
 Toda alegação técnica neste documento pode ser confirmada independentemente. Rode:
 
 ```bash
-# 1. Contagem de testes (deve mostrar 921 passing, 0 failed)
+# 1. Contagem de testes (deve mostrar 937 passing, 0 failed)
 cargo test 2>&1 | grep "test result:"
 
 # 2. Zero warnings de build

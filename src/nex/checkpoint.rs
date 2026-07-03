@@ -81,9 +81,36 @@ impl ReactiveRuleSnapshot {
             .actions
             .iter()
             .filter_map(|a| {
-                if a.contains("Log") {
-                    let msg = a.split('"').nth(1).unwrap_or("unknown").to_string();
-                    Some(ReactiveAction::Log(msg))
+                // Parse Debug format: Log("msg"), Emit("event"), MarkInactive { peer: "x" }, AdjustReputation { peer: "x", delta: N }
+                if let Some(msg) = a.strip_prefix("Log(\"").and_then(|s| s.strip_suffix("\")")) {
+                    Some(ReactiveAction::Log(msg.to_string()))
+                } else if let Some(event) = a
+                    .strip_prefix("Emit(\"")
+                    .and_then(|s| s.strip_suffix("\")"))
+                {
+                    Some(ReactiveAction::Emit(event.to_string()))
+                } else if a.starts_with("MarkInactive {") {
+                    let peer = a
+                        .split("peer: \"")
+                        .nth(1)
+                        .and_then(|s| s.split('"').next())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    Some(ReactiveAction::MarkInactive { peer })
+                } else if a.starts_with("AdjustReputation {") {
+                    let peer = a
+                        .split("peer: \"")
+                        .nth(1)
+                        .and_then(|s| s.split('"').next())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    // Debug format: "AdjustReputation { peer: \"x\", delta: N }"
+                    let delta = a
+                        .split("delta: ")
+                        .nth(1)
+                        .and_then(|s| s.trim_end_matches('}').trim().parse::<i32>().ok())
+                        .unwrap_or(0);
+                    Some(ReactiveAction::AdjustReputation { peer, delta })
                 } else {
                     None
                 }
@@ -239,5 +266,71 @@ mod tests {
 
         let restored = apply_checkpoint(&checkpoint, &mut PersistedData::default());
         assert_eq!(restored.len(), 1);
+    }
+
+    #[test]
+    fn reactive_actions_roundtrip_all_types() {
+        use crate::nex::ast::{ReactiveAction, Trigger};
+
+        let data = PersistedData::default();
+        let rules = vec![
+            ReactiveRule {
+                trigger: Trigger::HeartbeatMiss { threshold: 3 },
+                actions: vec![
+                    ReactiveAction::Log("heartbeat lost".to_string()),
+                    ReactiveAction::Emit("peer_down".to_string()),
+                ],
+            },
+            ReactiveRule {
+                trigger: Trigger::ReputationBelow { threshold: 0.3 },
+                actions: vec![
+                    ReactiveAction::MarkInactive {
+                        peer: "bad_node".to_string(),
+                    },
+                    ReactiveAction::AdjustReputation {
+                        peer: "bad_node".to_string(),
+                        delta: -10,
+                    },
+                ],
+            },
+        ];
+
+        let checkpoint = create_checkpoint("test_node", &data, &rules);
+        assert_eq!(checkpoint.reactive_rules.len(), 2);
+
+        let restored = apply_checkpoint(&checkpoint, &mut PersistedData::default());
+        assert_eq!(restored.len(), 2);
+
+        // Verify first rule: HeartbeatMiss with Log + Emit
+        assert_eq!(restored[0].trigger, Trigger::HeartbeatMiss { threshold: 3 });
+        assert_eq!(restored[0].actions.len(), 2);
+        assert_eq!(
+            restored[0].actions[0],
+            ReactiveAction::Log("heartbeat lost".to_string())
+        );
+        assert_eq!(
+            restored[0].actions[1],
+            ReactiveAction::Emit("peer_down".to_string())
+        );
+
+        // Verify second rule: ReputationBelow with MarkInactive + AdjustReputation
+        assert_eq!(
+            restored[1].trigger,
+            Trigger::ReputationBelow { threshold: 0.3 }
+        );
+        assert_eq!(restored[1].actions.len(), 2);
+        assert_eq!(
+            restored[1].actions[0],
+            ReactiveAction::MarkInactive {
+                peer: "bad_node".to_string()
+            }
+        );
+        assert_eq!(
+            restored[1].actions[1],
+            ReactiveAction::AdjustReputation {
+                peer: "bad_node".to_string(),
+                delta: -10
+            }
+        );
     }
 }

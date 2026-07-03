@@ -74,6 +74,7 @@ Resultado dos testes adversariais da Fase 2. Testes que falharam expõem fraquez
 ## Lacunas Identificadas
 
 1. ~~verify_signature() não valida timestamp~~ — ✅ CORRIGIDO (2026-07-03)
-2. **Ban é sticky por 24h** — decisão de design intencional, documentada
-3. **Testes de rede sob estresse** — não testamos throughput real (apenas unitário)
-4. **Replay de mensagens** — IDs únicos previnem EPA replay, mas nonce de handshake não está sendo testado
+2. ~~ReactiveRuleSnapshot só faz roundtrip de Log~~ — ✅ CORRIGIDO (2026-07-03): Emit, MarkInactive, AdjustReputation agora sobrevivem ao reload
+3. **Ban é sticky por 24h** — decisão de design intencional, documentada
+4. **Testes de rede sob estresse** — não testamos throughput real (apenas unitário)
+5. **Replay de mensagens** — IDs únicos previnem EPA replay, mas nonce de handshake não está sendo testado

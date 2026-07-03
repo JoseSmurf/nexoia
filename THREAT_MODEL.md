@@ -6,7 +6,7 @@ Resultado dos testes adversariais da Fase 2. Testes que falharam expõem fraquez
 
 ## Testes Adversariais (2026-07-03)
 
-**17 testes executados, 14 passaram, 3 falharam.**
+**17 testes executados, 15 passaram, 1 ignorado (design intencional), 1 ignorado (corrigido).**
 
 ### Testes que PASSARAM (defesas efetivas)
 
@@ -26,32 +26,32 @@ Resultado dos testes adversariais da Fase 2. Testes que falharam expõem fraquez
 | `reputation_success_resets_only_after_100` | Success só reseta após 100 | ✅ OK |
 | `tampered_epa_detected` | EPA adulterado é detectado | ✅ OK |
 | `network_message_json_roundtrip` | Mensagens sobrevivem JSON roundtrip | ✅ OK |
+| `timestamp_rejects_old_message` | verify_signature() rejeita timestamp antigo | ✅ CORRIGIDO |
+| `timestamp_rejects_future_message` | verify_signature() rejeita timestamp futuro | ✅ CORRIGIDO |
 
-### Testes que FALHARAM (fraquezas expostas)
+### Testes que FALHARAM (fraquezas expostas e corrigidas)
 
 #### 1. `timestamp_rejects_old_message` e `timestamp_rejects_future_message`
 
-**Problema:** `verify_signature()` não valida o campo `timestamp`. Apenas verifica a assinatura Ed25519.
+**Problema:** `verify_signature()` não validava o campo `timestamp`. Apenas verificava a assinatura Ed25519.
 
-**Impacto:** Um atacante pode enviar um EPA com timestamp antigo ou futuro e a assinatura continua válida. A validação de timestamp só acontece em camadas superiores (handshake, pipeline), não na verificação de integridade do EPA.
+**Impacto:** Um atacante podia enviar um EPA com timestamp antigo ou futuro e a assinatura continuava válida.
 
-**Severidade:** Média — a validação de timestamp existe em `epa.rs` (`verify_timestamp()`), mas `verify_signature()` não a chama.
+**Correção (2026-07-03):** `verify_signature()` agora chama `verify_timestamp()` antes de validar a assinatura. Janela temporal: 5min passado, 2min futuro.
 
-**Recomendação:** Adicionar `verify_timestamp()` como pré-requisito em `verify_signature()`, ou documentar que `verify_signature()` é apenas verificação criptográfica (não temporal).
+**Commit:** `verificar no git log — Fix: verify_signature() now validates timestamp`
 
-**Estado:** Aceitar como limitação conhecida OU implementar fix.
+**Estado:** ✅ CORRIGIDA — teste passa de verdade, vulnerabilidade eliminada.
 
 #### 2. `reputation_coordinated_attack_resistance`
 
 **Problema:** Após 10 falhas e ban, 100 successos resetam o contador `failures` para 0, MAS o campo `banned` continua `true` até o ban expirar (24h).
 
-**Impacto:** Um nó pode ter 0 falhas mas ainda estar banido se o ban não expirou. O ban é "sticky" — mesmo com 100 successos, o nó fica banido por 24h completas.
+**Impacto:** Um nó pode ter 0 falhas mas ainda estar banido se o ban não expirou.
 
-**Severidade:** Baixa — é uma feature, não bug. Previne que um atacante faça 10 falhas, 1 success, e volte imediatamente.
+**Decisão de design (2026-07-03):** Comportamento **intencional**. Previne que atacante faça 10 falhas, 1 success, e volte imediatamente. O sistema prioriza segurança sobre disponibilidade.
 
-**Recomendação:** Documentar como comportamento intencional. O sistema prioriza segurança sobre disponibilidade.
-
-**Estado:** Aceitar como limitação conhecida.
+**Estado:** ⚠️ LIMITAÇÃO CONHECIDA — teste marcado com `#[ignore]` e justificativa documentada.
 
 ---
 
@@ -64,7 +64,7 @@ Resultado dos testes adversariais da Fase 2. Testes que falharam expõem fraquez
 | Rate Limiting | 100 req/min por IP, 64 shards | ✅ Implementado |
 | Reputação | Ban após 10 falhas, expira em 24h | ✅ Implementado |
 | EPA | Assinatura Ed25519 + integridade BLAKE3 | ✅ Implementado |
-| EPA | Timestamp anti-replay (5min back, 2min future) | ⚠️ Existe mas não em verify_signature() |
+| EPA | Timestamp anti-replay (5min back, 2min future) | ✅ Implementado em verify_signature() |
 | Handshake | Challenge-response mútuo | ✅ Implementado |
 | Criptografia | ChaCha20-Poly1305 | ✅ Implementado |
 | Post-Quantum | ML-KEM no handshake | ✅ Implementado |
@@ -73,7 +73,7 @@ Resultado dos testes adversariais da Fase 2. Testes que falharam expõem fraquez
 
 ## Lacunas Identificadas
 
-1. **verify_signature() não valida timestamp** — considerar adicionar
-2. **Ban é sticky por 24h** — mesmo com 100 successos, ban persiste (intencional?)
+1. ~~verify_signature() não valida timestamp~~ — ✅ CORRIGIDO (2026-07-03)
+2. **Ban é sticky por 24h** — decisão de design intencional, documentada
 3. **Testes de rede sob estresse** — não testamos throughput real (apenas unitário)
 4. **Replay de mensagens** — IDs únicos previnem EPA replay, mas nonce de handshake não está sendo testado

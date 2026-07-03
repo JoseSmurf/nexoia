@@ -181,10 +181,15 @@ impl SharedEPA {
 
     /// Verifica assinatura Ed25519 completa.
     /// Valida chave pública antes de verificar (rejeita chaves triviais).
+    /// Também valida timestamp — rejeita mensagens com mais de 5 minutos
+    /// no passado ou 2 minutos no futuro (anti-replay).
     pub fn verify_signature(&self) -> Result<(), VerifyError> {
         if self.public_key.is_empty() {
             return Err(VerifyError::MissingPublicKey);
         }
+
+        // Validar timestamp antes da assinatura (anti-replay)
+        self.verify_timestamp()?;
 
         // Validar chave pública antes de verificar (verify_signature já rejeita chaves triviais)
         let sig_valid = verify_signature(

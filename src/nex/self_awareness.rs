@@ -71,6 +71,15 @@ impl SelfAwareness {
         }
     }
 
+    /// Versão para testes — não roda comandos reais
+    #[allow(dead_code)]
+    pub fn fake() -> Self {
+        Self {
+            project_dir: PathBuf::new(),
+            cargo_path: String::new(),
+        }
+    }
+
     fn find_cargo() -> String {
         // Tenta USERPROFILE primeiro (Windows), depois HOME (Unix)
         if let Ok(home) = std::env::var("USERPROFILE") {
@@ -147,6 +156,11 @@ impl SelfAwareness {
 
     /// O ato de olhar pra si mesmo. Retorna o estado real.
     pub fn observe(&self) -> ObservedState {
+        // Modo fake para testes
+        if self.cargo_path.is_empty() {
+            return self.fake_state();
+        }
+
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -192,9 +206,39 @@ impl SelfAwareness {
         }
     }
 
+    /// Estado falso para testes — rápido, sem I/O
+    fn fake_state(&self) -> ObservedState {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let timestamp_iso = chrono::DateTime::from_timestamp(timestamp as i64, 0)
+            .unwrap_or_else(chrono::Utc::now)
+            .to_rfc3339();
+        let content = format!("fake:{}:0:0:true:0:true", timestamp);
+        let health_hash = canonical_hash(&content);
+        ObservedState {
+            build_ok: true,
+            build_warnings: 0,
+            tests_passed: 0,
+            tests_failed: 0,
+            tests_ignored: 0,
+            clippy_ok: true,
+            clippy_warnings: 0,
+            fmt_ok: true,
+            timestamp,
+            timestamp_iso,
+            health_hash,
+        }
+    }
+
     /// Observação leve — só testes (para ciclos rápidos)
     #[allow(dead_code)]
     pub fn observe_light(&self) -> ObservedState {
+        if self.cargo_path.is_empty() {
+            return self.fake_state();
+        }
+
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -233,13 +277,11 @@ mod tests {
 
     #[test]
     fn self_awareness_observe() {
-        let dir = std::env::var("CARGO_MANIFEST_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."));
-        let sa = SelfAwareness::new(dir);
-        let state = sa.observe_light();
+        let sa = SelfAwareness::fake();
+        let state = sa.observe();
         assert!(!state.health_hash.is_empty());
         assert!(state.timestamp > 0);
+        assert!(state.build_ok);
     }
 
     #[test]

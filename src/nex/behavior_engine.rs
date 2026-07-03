@@ -87,6 +87,22 @@ impl BehaviorEngine {
         }
     }
 
+    /// Versão para testes — não roda comandos reais
+    #[allow(dead_code)]
+    pub fn new_fake(data_dir: &Path) -> Self {
+        let knowledge_dir = data_dir.join("knowledge");
+        fs::create_dir_all(&knowledge_dir).ok();
+
+        let knowledge = Self::carregar_knowledge(&knowledge_dir);
+
+        Self {
+            knowledge_dir,
+            knowledge,
+            feedback: FeedbackLoop::new(),
+            awareness: SelfAwareness::fake(),
+        }
+    }
+
     /// Carrega conhecimento de disco (ou cria novo)
     fn carregar_knowledge(dir: &std::path::Path) -> Knowledge {
         let path = dir.join("knowledge.json");
@@ -458,19 +474,12 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    fn test_project_dir() -> PathBuf {
-        std::env::var("CARGO_MANIFEST_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."))
-    }
-
     #[test]
     fn behavior_engine_ciclo() {
         let dir = tempdir().unwrap();
         let data_dir = dir.path().to_path_buf();
-        let project = test_project_dir();
         let mut log = IterationLog::new(&data_dir);
-        let mut engine = BehaviorEngine::new(&data_dir, &project);
+        let mut engine = BehaviorEngine::new_fake(&data_dir);
 
         let resultado = engine.ciclo(&mut log);
         assert!(resultado.score >= 0.0);
@@ -481,24 +490,22 @@ mod tests {
     fn knowledge_persistente() {
         let dir = tempdir().unwrap();
         let data_dir = dir.path().to_path_buf();
-        let project = test_project_dir();
 
         {
             let mut log = IterationLog::new(&data_dir);
-            let mut engine = BehaviorEngine::new(&data_dir, &project);
+            let mut engine = BehaviorEngine::new_fake(&data_dir);
             engine.ciclo(&mut log);
         }
 
         // Recarrega e verifica que knowledge persistiu
-        let engine2 = BehaviorEngine::new(&data_dir, &project);
+        let engine2 = BehaviorEngine::new_fake(&data_dir);
         assert_eq!(engine2.knowledge.iteracoes, 1);
     }
 
     #[test]
     fn behavior_engine_resumo() {
         let dir = tempdir().unwrap();
-        let project = test_project_dir();
-        let engine = BehaviorEngine::new(dir.path(), &project);
+        let engine = BehaviorEngine::new_fake(dir.path());
         let resumo = engine.resumo();
         assert!(resumo.contains("iterações="));
         assert!(resumo.contains("regras="));

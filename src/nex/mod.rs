@@ -6,6 +6,7 @@ pub mod checkpoint;
 pub mod dictionary;
 pub mod eval;
 pub mod feedback_loop;
+pub mod internet;
 pub mod iteration;
 pub mod layers;
 pub mod manifesto;

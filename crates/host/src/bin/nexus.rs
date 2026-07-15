@@ -22,6 +22,12 @@ impl GlobalConsciousness {
     }
 }
 
+impl Default for GlobalConsciousness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A Inicialização do Motor Wasmtime blindado
 pub fn initialize_wasm_engine() -> (Engine, Store<()>, Memory) {
     let mut config = Config::new();
@@ -48,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=========================================================");
 
     // 1. Instanciação Lock-Free da Consciência
-    let consciousness = Arc::new(GlobalConsciousness::new());
+    let _consciousness = Arc::new(GlobalConsciousness::default());
     println!("[*] Consciência Global Lock-Free alocada com Sucesso.");
 
     // 2. Inicialização do Motor Wasm Isolado e Mapeamento de RAM
@@ -65,7 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         edge_addr
     );
 
-    println!("[+] NexoIA operando na Arquitetura Nível 5.");
+    println!("[+] NexoIA operando na Arquitetura Nível 6.");
 
     // Loop principal da Borda (Escutando os pacotes)
     // Em produção, isso alimentará a Quinn (QUIC Endpoint)

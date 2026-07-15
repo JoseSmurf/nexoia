@@ -1,4 +1,5 @@
 #![no_std]
+#![cfg(target_arch = "wasm32")]
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::arch::wasm32::*;
 

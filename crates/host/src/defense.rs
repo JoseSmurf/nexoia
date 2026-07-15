@@ -194,7 +194,7 @@ impl RateLimiter {
 
         let reserved =
             self.active_sources
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                     if current < self.max_sources {
                         Some(current + 1)
                     } else {

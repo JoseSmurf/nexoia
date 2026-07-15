@@ -1,0 +1,17 @@
+[package]
+name = "wasm_cortex"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"] # Necessário para compilar Wasm puro dinâmico
+
+[dependencies]
+# Nenhuma dependência de I/O ou OS. Apenas matemática pura e estruturação.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+blake3 = "1"
+
+[profile.release]
+opt-level = 3
+lto = true

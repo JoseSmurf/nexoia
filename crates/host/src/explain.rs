@@ -76,7 +76,7 @@ pub struct ExplainReport {
 ///
 /// # Exemplo
 /// ```ignore
-/// use nexoia::explain::{explain_chain, load_decisions_jsonl};
+/// use titanium_host::explain::{explain_chain, load_decisions_jsonl};
 ///
 /// let records = load_decisions_jsonl("decisions.jsonl").unwrap();
 /// let report = explain_chain(&records);

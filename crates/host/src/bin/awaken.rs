@@ -44,7 +44,7 @@ async fn main() {
 
     // ── 1. PRIMEIRO OLHAR ──────────────────────────────────────
     println!("[1] Olhando pra mim mesmo...");
-    let awareness = nexoia::nex::self_awareness::SelfAwareness::new(proj.clone());
+    let awareness = titanium_host::nex::self_awareness::SelfAwareness::new(proj.clone());
     let observacao = awareness.observe();
 
     println!(
@@ -77,7 +77,7 @@ async fn main() {
 
     // ── 2. MANIFESTO ───────────────────────────────────────────
     println!("\n[2] Lendo manifesto...");
-    let manifesto = nexoia::nex::manifesto::Manifesto::gerar();
+    let manifesto = titanium_host::nex::manifesto::Manifesto::gerar();
     println!("    Titulo:     {}", manifesto.titulo);
     println!("    Principios: {}", manifesto.principios.len());
     println!("    Capacidades:{}", manifesto.capacidades.len());
@@ -92,8 +92,8 @@ async fn main() {
 
     // ── 3. PRIMEIRO CICLO ─────────────────────────────────────
     println!("\n[3] Primeiro ciclo de vida...");
-    let mut log = nexoia::nex::iteration::IterationLog::new(&data);
-    let mut engine = nexoia::nex::behavior_engine::BehaviorEngine::new(&data, &proj);
+    let mut log = titanium_host::nex::iteration::IterationLog::new(&data);
+    let mut engine = titanium_host::nex::behavior_engine::BehaviorEngine::new(&data, &proj);
 
     let resultado = engine.ciclo(&mut log);
     println!(

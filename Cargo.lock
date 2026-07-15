@@ -3562,6 +3562,7 @@ dependencies = [
  "bytes",
  "chacha20poly1305",
  "chrono",
+ "crossbeam-epoch",
  "crossbeam-skiplist",
  "ed25519-dalek",
  "flurry",

@@ -16,7 +16,7 @@ pub struct GlobalConsciousness {
 impl GlobalConsciousness {
     pub fn new() -> Self {
         Self {
-            neural_graph: SkipList::new(),
+            neural_graph: SkipList::new(crossbeam_epoch::default_collector().clone()),
             dictionary: HashMap::new(),
         }
     }

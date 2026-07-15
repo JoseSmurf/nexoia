@@ -946,7 +946,7 @@ mod tests {
 
     #[test]
     fn import_resolves_examples_lib_risk() {
-        let examples_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+        let examples_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
         let source = fs::read_to_string(examples_dir.join("check.nex")).expect("read check.nex");
         let program = parse(&source).expect("parse");
         let expanded = expand_program(program, &examples_dir).expect("expand imports");

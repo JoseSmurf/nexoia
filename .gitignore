@@ -12,6 +12,8 @@ AUDITORIA_*.md
 # NexoIA runtime generated data & logs
 /data/iterations/
 /data/awakening/
+/data/knowledge/*.json
+/data/knowledge/*.jsonl
 test_output.txt
 .mimocode/
 .cron-lock

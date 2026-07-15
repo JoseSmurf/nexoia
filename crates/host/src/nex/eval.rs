@@ -829,7 +829,7 @@ mod tests {
 
     #[test]
     fn hello_example_produces_four_entries_and_anchored_sum() {
-        let source = include_str!("../../../examples/hello.nex");
+        let source = include_str!("../../../../examples/hello.nex");
         let program = parse(source).expect("hello.nex should parse");
         let execution = execute(program).expect("hello.nex should evaluate");
 

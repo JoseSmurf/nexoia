@@ -6,6 +6,7 @@ pub mod decision;
 pub mod defense;
 pub mod evidence;
 pub mod explain;
+pub mod ffi;
 pub mod hash;
 pub mod lgpd;
 pub mod lgpd_rights;

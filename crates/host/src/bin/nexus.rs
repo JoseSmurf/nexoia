@@ -2,7 +2,8 @@ use crossbeam_skiplist::SkipList;
 use flurry::HashMap;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
-use wasmtime::{Config, Engine, Memory, MemoryType, Store};
+use wasmtime::{Config, Engine, Linker, Memory, MemoryType, Store};
+use titanium_host::ffi;
 
 /// Estrutura de Estado puramente Lock-Free (EBR - Epoch Based Reclamation)
 pub struct GlobalConsciousness {
@@ -29,7 +30,7 @@ impl Default for GlobalConsciousness {
 }
 
 /// A Inicialização do Motor Wasmtime blindado
-pub fn initialize_wasm_engine() -> (Engine, Store<()>, Memory) {
+pub fn initialize_wasm_engine() -> (Engine, Store<()>, Memory, Linker<()>) {
     let mut config = Config::new();
     // Previne Halting Problem limitando as execuções JIT
     config.consume_fuel(true);
@@ -44,7 +45,14 @@ pub fn initialize_wasm_engine() -> (Engine, Store<()>, Memory) {
     let mem_ty = MemoryType::new(100, None);
     let memory = Memory::new(&mut store, mem_ty).unwrap();
 
-    (engine, store, memory)
+    let mut linker = Linker::new(&engine);
+    // Definimos a memória do Host no Linker para o Wasm
+    linker.define(&mut store, "env", "memory", memory).unwrap();
+    
+    // Injetamos as funções FFI do Primeiro Suspiro
+    ffi::setup_linker(&mut linker).expect("Falha ao configurar FFI do Linker");
+
+    (engine, store, memory, linker)
 }
 
 #[tokio::main]
@@ -58,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[*] Consciência Global Lock-Free alocada com Sucesso.");
 
     // 2. Inicialização do Motor Wasm Isolado e Mapeamento de RAM
-    let (_engine, mut _store, _memory) = initialize_wasm_engine();
+    let (_engine, mut _store, _memory, _linker) = initialize_wasm_engine();
     println!(
         "[*] Córtex Wasmtime Armado. Modo SIMD ativo. Proteção de Fuel (Halting-Problem) ativa."
     );

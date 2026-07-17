@@ -14,6 +14,7 @@ pub mod limits;
 pub mod memory;
 pub mod network;
 pub mod nex;
+pub mod p2p;
 pub mod provenance;
 pub mod quality;
 pub mod state;

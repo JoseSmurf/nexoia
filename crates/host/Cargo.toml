@@ -46,6 +46,8 @@ quinn = "0.11"
 libp2p = { version = "0.53", features = ["kad", "noise", "yamux", "tcp", "macros"] }
 postcard = { version = "1", features = ["alloc"] }
 rkyv = "0.7"
+anyhow = "1.0"
+iroh = "0.15"
 [dev-dependencies]
 tempfile = "3"
 tower = { version = "0.4", features = ["util"] }

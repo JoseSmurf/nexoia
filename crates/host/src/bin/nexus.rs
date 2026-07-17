@@ -77,7 +77,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "[*] Córtex Wasmtime Armado. Modo SIMD ativo. Proteção de Fuel (Halting-Problem) ativa."
     );
 
-    // 3. Abertura da Fronteira UDP (Stateless QUIC Edge)
+    // 3. Inicialização da Rede P2P Iroh (O Sistema Nervoso)
+    if let Err(e) = titanium_host::p2p::start_p2p_node().await {
+        eprintln!("[-] Falha crítica ao iniciar nó P2P: {:?}", e);
+    }
+
+    // 4. Abertura da Fronteira UDP (Stateless QUIC Edge)
     let edge_addr = "0.0.0.0:4433";
     let socket = UdpSocket::bind(edge_addr).await?;
     println!(

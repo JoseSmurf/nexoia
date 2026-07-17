@@ -16,14 +16,11 @@ pub async fn start_p2p_node(
     println!("🔥 Nó NexoIA online. ID P2P: {}", node_id);
 
     // 2. Constrói o protocolo Gossip e o Roteador
-    let gossip = Gossip::builder()
-        .spawn(endpoint.clone())
-        .map_err(|e| anyhow::anyhow!(e))?;
+    let gossip = Gossip::builder().spawn(endpoint.clone());
 
     let _router = Router::builder(endpoint)
         .accept(ALPN, gossip.clone())
-        .spawn()
-        .map_err(|e| anyhow::anyhow!(e))?;
+        .spawn();
 
     // 3. Define o Tópico Neural do Enxame
     let topic_id = TopicId::from_bytes([23u8; 32]);

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bytes::Bytes;
-use futures_util::StreamExt;
+use futures_util::{StreamExt, stream::FusedStream};
 use iroh::{endpoint::presets, protocol::Router, Endpoint};
 use iroh_gossip::{api::Event, net::Gossip, TopicId, ALPN};
 use tokio::sync::mpsc;
@@ -24,21 +24,27 @@ pub async fn start_p2p_node(
 
     // 3. Define o Tópico Neural do Enxame
     let topic_id = TopicId::from_bytes([23u8; 32]);
-    let mut gossip_topic = gossip.subscribe(topic_id, vec![]).await?;
+    let gossip_topic = gossip.subscribe(topic_id, vec![]).await?;
 
     // 4. Laço de Ingestão e Transmissão
     tokio::spawn(async move {
+        let (mut broadcast, mut events) = gossip_topic.split();
+        let mut events = events.fuse();
         loop {
             tokio::select! {
                 Some(packet) = outbound_rx.recv() => {
                     println!("🌐 [P2P ROUTER] Transmitindo reflexo de {} bytes para o enxame Iroh...", packet.len());
-                    let _ = gossip_topic.broadcast(packet).await;
+                    let _ = broadcast.broadcast(packet).await;
                 }
-                event = gossip_topic.next() => {
-                    if let Some(Ok(Event::Received(msg))) = event {
-                        if msg.content.len() <= 1024 {
-                            let _ = tx.send(msg.content).await;
+                event = events.next(), if !events.is_terminated() => {
+                    match event {
+                        Some(Ok(Event::Received(msg))) => {
+                            if msg.content.len() <= 1024 {
+                                let _ = tx.send(msg.content).await;
+                            }
                         }
+                        Some(_) => {}
+                        None => break,
                     }
                 }
             }

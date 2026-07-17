@@ -1,4 +1,4 @@
-use crate::provenance::{Provenance, MAX_PROVENANCE};
+use crate::provenance::Provenance;
 
 #[derive(Debug)]
 pub struct RuntimeState {

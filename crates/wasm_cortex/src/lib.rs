@@ -148,6 +148,7 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
 static mut INGEST_BUFFER: [u8; 1024] = [0; 1024];
 
 #[cfg(target_arch = "wasm32")]

@@ -6,8 +6,10 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+#[allow(dead_code)]
 pub const MAX_PROVENANCE: usize = 12;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Provenance {
     pub fragments: [u64; MAX_PROVENANCE],
@@ -25,6 +27,7 @@ impl Default for Provenance {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NexoPacket {
     pub fragment_id: u64,

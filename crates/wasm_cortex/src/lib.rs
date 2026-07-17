@@ -131,22 +131,57 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable();
 }
 
-/// Buffer persistente na seção de dados do Wasm (imune a alloca/stack-reuse do LLVM).
-/// O backend LLVM para Wasm pode reutilizar o shadow stack de variáveis locais
-/// (`[0u8; 256]` stack-local) ANTES do `broadcast_packet` ler os dados,
-/// resultando em payload zerado no Host. Este static garante que a memória
-/// permaneça válida durante toda a chamada FFI síncrona.
+/// Buffer persistente na seção de dados do Wasm (1024 bytes).
+/// Imune a alloca/stack-reuse do LLVM — o backend pode reutilizar o
+/// shadow stack de variáveis locais ANTES do `broadcast_packet` ler,
+/// resultando em payload zerado. O static elimina esse race.
 #[cfg(target_arch = "wasm32")]
-static mut REFLEX_BUFFER: [u8; 256] = [0; 256];
+static mut REFLEX_BUFFER: [u8; 1024] = [0; 1024];
 
+/// Contador monotônico de geração do reflexo.
+/// Incrementado a cada `emit_neural_reflex` bem-sucedido.
+/// Permite ao Host detectar dados novos via polling assíncrono:
+///
+/// ```ignore
+/// // Exemplo de uso no Host (wasmtime):
+/// let get_gen = instance.get_typed_func::<(), u64>(&mut store, "get_reflex_generation")?;
+/// let gen = get_gen.call(&mut store, ())?;
+/// if gen != last_seen { /* ler REFLEX_BUFFER */ }
+/// ```
 #[cfg(target_arch = "wasm32")]
-pub fn emit_neural_reflex(packet: &schema::NexoPacket) {
+static mut REFLEX_GENERATION: u64 = 0;
+
+/// Serializa `packet` com postcard no `REFLEX_BUFFER` e envia ao Host.
+///
+/// # Retorno
+///
+/// * `true`  — serializado e transmitido com sucesso.
+/// * `false` — falha na serialização (buffer insuficiente) ou o Host
+///             rejeitou o pacote (bounds check ou canal cheio).
+#[cfg(target_arch = "wasm32")]
+pub fn emit_neural_reflex(packet: &schema::NexoPacket) -> bool {
     unsafe {
         let buf: &mut [u8] = &mut REFLEX_BUFFER;
-        if let Ok(slice) = postcard::to_slice(packet, buf) {
-            broadcast_packet(slice.as_ptr(), slice.len());
+        match postcard::to_slice(packet, buf) {
+            Ok(slice) => {
+                let sent = broadcast_packet(slice.as_ptr(), slice.len());
+                if sent > 0 {
+                    REFLEX_GENERATION = REFLEX_GENERATION.wrapping_add(1);
+                    true
+                } else {
+                    false
+                }
+            }
+            Err(_) => false,
         }
     }
+}
+
+/// Getter FFI para o Host consultar o generation counter.
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn get_reflex_generation() -> u64 {
+    unsafe { REFLEX_GENERATION }
 }
 
 /// Estado Cognitivo Persistente do Córtex.
@@ -217,7 +252,7 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
                     payload: reflex_payload,
                     provenance: reflex_provenance,
                 };
-                emit_neural_reflex(&reflex);
+                let _reflex_ok = emit_neural_reflex(&reflex);
                 return 3; // Código 3 = Expansão Cognitiva (novo estado absorvido)
             }
 
@@ -231,7 +266,7 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
                 payload: reflex_payload,
                 provenance: reflex_provenance,
             };
-            emit_neural_reflex(&reflex);
+            let _reflex_ok = emit_neural_reflex(&reflex);
 
             return 1;
         }

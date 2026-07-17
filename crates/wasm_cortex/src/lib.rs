@@ -6,6 +6,7 @@ use core::arch::wasm32::*;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 pub mod eval;
+pub mod knowledge;
 pub mod provenance;
 pub mod schema;
 
@@ -61,6 +62,8 @@ extern "C" {
     fn request_fragment_by_id(id: u64, ptr: *mut u8, max_len: usize) -> usize;
     fn forget_active_context(fragment_id: u64) -> u32;
     fn broadcast_packet(ptr: *const u8, len: usize) -> u32;
+    fn lookup_semantic(hash_ptr: *const u8, out_ptr: *mut u8, out_max_len: u32) -> u32;
+    fn batch_forget(ptr: *const u64, count: u32) -> u32;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -161,7 +164,7 @@ static mut REFLEX_GENERATION: u64 = 0;
 #[cfg(target_arch = "wasm32")]
 pub fn emit_neural_reflex(packet: &schema::NexoPacket) -> bool {
     unsafe {
-        let buf: &mut [u8] = &mut REFLEX_BUFFER;
+        let buf: &mut [u8] = &mut *(&raw mut REFLEX_BUFFER);
         match postcard::to_slice(packet, buf) {
             Ok(slice) => {
                 let sent = broadcast_packet(slice.as_ptr(), slice.len());
@@ -173,6 +176,26 @@ pub fn emit_neural_reflex(packet: &schema::NexoPacket) -> bool {
                 }
             }
             Err(_) => false,
+        }
+    }
+}
+
+/// Ponte Semântica: consulta o dicionário do Host por tradução hash→texto.
+///
+/// # Retorno
+///
+/// * `Some(String)` — texto traduzido encontrado no dicionário semântico do Host.
+/// * `None` — hash não encontrado ou falha na comunicação FFI.
+#[cfg(target_arch = "wasm32")]
+pub fn lookup(hash: &[u8; 32]) -> Option<alloc::string::String> {
+    unsafe {
+        let mut buf = [0u8; 512];
+        let len = lookup_semantic(hash.as_ptr(), buf.as_mut_ptr(), buf.len() as u32);
+        if len > 0 {
+            let slice = core::slice::from_raw_parts(buf.as_ptr(), len as usize);
+            Some(alloc::string::String::from_utf8_lossy(slice).into_owned())
+        } else {
+            None
         }
     }
 }
@@ -192,6 +215,35 @@ static mut CORTEX_VALUE: f32 = 1.0;
 static mut CORTEX_STRENGTH: u8 = 128;
 #[cfg(target_arch = "wasm32")]
 static mut INGEST_COUNT: u32 = 0;
+#[cfg(target_arch = "wasm32")]
+static mut KNOWLEDGE_TABLE: knowledge::KnowledgeTable = knowledge::KnowledgeTable::new();
+
+/// Executa um ciclo completo de Sono REM.
+///
+/// 1. Aplica decaimento (strength /= 2) em todos os fragmentos.
+/// 2. Marca como dirty os que caíram abaixo do threshold.
+/// 3. Envia lote de IDs sujos ao Host via `batch_forget`.
+/// 4. Limpa os flags e libera slots dos processados.
+///
+/// Retorna o número de fragmentos esquecidos neste ciclo.
+#[cfg(target_arch = "wasm32")]
+fn rem_cycle() -> u32 {
+    unsafe {
+        let tbl = &raw mut KNOWLEDGE_TABLE;
+        (&mut *tbl).decay(INGEST_COUNT);
+
+        let mut dirty_buf = [0u64; knowledge::KNOWLEDGE_TABLE_SIZE];
+        let dirty_count = (&mut *tbl).collect_dirty(&mut dirty_buf);
+
+        if dirty_count > 0 {
+            let processed = batch_forget(dirty_buf.as_ptr(), dirty_count);
+            (&mut *tbl).clear_dirty(&dirty_buf[..processed as usize]);
+            processed
+        } else {
+            0
+        }
+    }
+}
 
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
@@ -233,6 +285,14 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
             let score = eval::calculate_contradiction_score(&current_state, &received_state);
 
             INGEST_COUNT += 1;
+
+            // Registra o fragmento na tabela de conhecimento
+            (&mut *(&raw mut KNOWLEDGE_TABLE)).insert_or_update(reflex_fragment_id, strength, INGEST_COUNT);
+
+            // Ciclo REM: Sono Ativo a cada N ingestões
+            if INGEST_COUNT % knowledge::REM_INTERVAL == 0 {
+                rem_cycle();
+            }
 
             if score > 0.8 {
                 // ══════════════════════════════════════════════════════

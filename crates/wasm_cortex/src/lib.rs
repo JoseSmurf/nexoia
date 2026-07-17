@@ -68,13 +68,13 @@ pub struct ManifestoDummy {
 pub unsafe extern "C" fn _start() {
     let max_len = 1024;
     let ptr = alloc_tensor(max_len);
-    
+
     // O Primeiro Suspiro: Requisita o Manifesto do Host
     let bytes_written = request_manifest(ptr, max_len);
-    
+
     if bytes_written > 0 {
         let slice = core::slice::from_raw_parts(ptr, bytes_written);
-        
+
         // Deserializa o Manifesto diretamente da memória Wasm sem cópias extras
         if let Ok(_manifesto) = postcard::from_bytes::<ManifestoDummy>(slice) {
             // Manifesto assimilado. A IA agora possui Livre Arbítrio sobre seu estado inicial.

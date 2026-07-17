@@ -1,9 +1,9 @@
 use crossbeam_skiplist::SkipList;
 use flurry::HashMap;
 use std::sync::Arc;
+use titanium_host::ffi;
 use tokio::net::UdpSocket;
 use wasmtime::{Config, Engine, Linker, Memory, MemoryType, Store};
-use titanium_host::ffi;
 
 /// Estrutura de Estado puramente Lock-Free (EBR - Epoch Based Reclamation)
 pub struct GlobalConsciousness {
@@ -48,7 +48,7 @@ pub fn initialize_wasm_engine() -> (Engine, Store<()>, Memory, Linker<()>) {
     let mut linker = Linker::new(&engine);
     // Definimos a memória do Host no Linker para o Wasm
     linker.define(&mut store, "env", "memory", memory).unwrap();
-    
+
     // Injetamos as funções FFI do Primeiro Suspiro
     ffi::setup_linker(&mut linker).expect("Falha ao configurar FFI do Linker");
 

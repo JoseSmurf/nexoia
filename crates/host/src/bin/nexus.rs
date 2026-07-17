@@ -3,6 +3,7 @@ use flurry::HashMap;
 use std::sync::Arc;
 use titanium_host::ffi::{self, HostState};
 use titanium_host::memory::SemanticMemoryStore;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::UdpSocket;
 use wasmtime::{Config, Engine, Linker, Memory, MemoryType, Store};
 
@@ -76,9 +77,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _consciousness = Arc::new(GlobalConsciousness::default());
     println!("[*] Consciência Global Lock-Free alocada com Sucesso.");
 
-    // 1. Cria o canal
+    // 1. Cria os canais
     let (tx, mut rx) = tokio::sync::mpsc::channel(100);
     let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(100);
+    let (cli_tx, mut cli_rx) = tokio::sync::mpsc::channel::<(String, [u8; 32])>(100);
+
+    // 1.5 Task Assíncrona do Terminal (A Boca e Ouvidos do Humano)
+    tokio::spawn(async move {
+        let stdin = tokio::io::stdin();
+        let reader = BufReader::new(stdin);
+        let mut lines = reader.lines();
+
+        while let Ok(Some(line)) = lines.next_line().await {
+            let line = line.trim().to_string();
+            if line.is_empty() {
+                continue;
+            }
+
+            let hash = blake3::hash(line.as_bytes());
+            let _ = cli_tx.send((line, *hash.as_bytes())).await;
+        }
+    });
 
     // 2. Inicialização do Motor Wasm Isolado, Mapeamento de RAM e Disco (WAL)
     let wal = titanium_host::storage::WalBuffer::new("nexo_wal.log")
@@ -143,6 +162,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         eprintln!("[-] Falha crítica ao limpar o WAL após Snapshot: {:?}", e);
                     } else {
                         println!("[+] Medula WAL limpa e pronta para novos registros.");
+                    }
+                }
+            }
+            Some((text, hash)) = cli_rx.recv() => {
+                // 1. Registra no Dicionário Semântico (Memória do Host)
+                _store.data_mut().memory_store.semantic_dict.insert(hash, text);
+
+                // 2. Transforma o Texto num NexoPacket Estrito
+                let packet = titanium_host::types::NexoPacket {
+                    fragment_id: 0,
+                    payload: hash,
+                    provenance: titanium_host::types::Provenance::default(),
+                };
+
+                if let Ok(bytes) = postcard::to_allocvec(&packet) {
+                    println!("[*] Humano -> Wasm: Injetando Encadeamento Semântico...");
+                    let ptr = get_ingest_buffer_ptr.call(&mut _store, ())?;
+                    _memory.write(&mut _store, ptr as usize, &bytes)?;
+
+                    if ingest_packet.call(&mut _store, (ptr, bytes.len() as u32))? == 1 {
+                        println!("[+] Córtex Absorveu a Mensagem!");
                     }
                 }
             }

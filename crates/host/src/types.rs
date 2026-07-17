@@ -6,6 +6,32 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub const MAX_PROVENANCE: usize = 12;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Provenance {
+    pub fragments: [u64; MAX_PROVENANCE],
+    pub influence: [u8; MAX_PROVENANCE],
+    pub count: u8,
+}
+
+impl Default for Provenance {
+    fn default() -> Self {
+        Self {
+            fragments: [0; MAX_PROVENANCE],
+            influence: [0; MAX_PROVENANCE],
+            count: 0,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NexoPacket {
+    pub fragment_id: u64,
+    pub payload: [u8; 32],
+    pub provenance: Provenance,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EvidenceStrength {

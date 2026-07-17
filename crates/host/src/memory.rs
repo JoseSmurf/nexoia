@@ -12,6 +12,7 @@ pub struct SemanticMemoryStore {
     pub index: HashMap<u64, FragmentMeta>,
     pub tombstones: HashSet<u64>,
     pub live_fragments: HashSet<u64>,
+    pub semantic_dict: HashMap<[u8; 32], String>,
 }
 
 impl SemanticMemoryStore {
@@ -20,6 +21,7 @@ impl SemanticMemoryStore {
             index: HashMap::new(),
             tombstones: HashSet::new(),
             live_fragments: HashSet::new(),
+            semantic_dict: HashMap::new(),
         }
     }
 

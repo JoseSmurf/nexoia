@@ -86,6 +86,26 @@ pub fn setup_linker(linker: &mut Linker<HostState>) -> Result<(), wasmtime::Erro
             // Validação simples de bounds
             if end <= data.len() {
                 let packet_bytes = bytes::Bytes::copy_from_slice(&data[start..end]);
+
+                // Tenta decodificar como NexoPacket para tradução semântica
+                if let Ok(nexo_packet) =
+                    postcard::from_bytes::<crate::types::NexoPacket>(&packet_bytes)
+                {
+                    if let Some(text) = caller
+                        .data()
+                        .memory_store
+                        .semantic_dict
+                        .get(&nexo_packet.payload)
+                    {
+                        println!("🤖 [NexoIA]: {}", text);
+                    } else {
+                        println!(
+                            "🤖 [NexoIA]: <Hash não traduzível: {:?}>",
+                            nexo_packet.payload
+                        );
+                    }
+                }
+
                 let _ = caller.data_mut().p2p_tx.try_send(packet_bytes);
                 1
             } else {

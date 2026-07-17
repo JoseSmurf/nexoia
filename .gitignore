@@ -17,3 +17,7 @@ AUDITORIA_*.md
 test_output.txt
 .mimocode/
 .cron-lock
+
+# Knowledge bootstrapping
+*.jsonl
+knowledge.json

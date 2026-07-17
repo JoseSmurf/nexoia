@@ -67,6 +67,70 @@ pub fn initialize_wasm_engine(
     (engine, store, memory, linker)
 }
 
+/// Carrega e injeta conceitos primordiais no Wasm Cortex
+async fn bootstrap_knowledge(
+    path: &std::path::Path,
+    store: &mut Store<HostState>,
+    memory: &Memory,
+    get_ingest: &wasmtime::TypedFunc<(), u32>,
+    ingest: &wasmtime::TypedFunc<(u32, u32), u32>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !path.exists() {
+        println!(
+            "[-] Arquivo de conhecimento base não encontrado em {:?}. Ignorando.",
+            path
+        );
+        return Ok(());
+    }
+
+    let content = tokio::fs::read_to_string(path).await?;
+    let json: serde_json::Value = serde_json::from_str(&content)?;
+
+    let mut concepts = Vec::new();
+    if let Some(arr) = json.as_array() {
+        for val in arr {
+            if let Some(s) = val.as_str() {
+                concepts.push(s.to_string());
+            }
+        }
+    } else if let Some(obj) = json.as_object() {
+        for (k, v) in obj {
+            concepts.push(k.clone());
+            if let Some(s) = v.as_str() {
+                concepts.push(s.to_string());
+            }
+        }
+    }
+
+    println!(
+        "[*] Bootstrapping Semântico: Injetando {} conceitos...",
+        concepts.len()
+    );
+
+    for concept in concepts {
+        let hash = blake3::hash(concept.as_bytes());
+        store
+            .data_mut()
+            .memory_store
+            .semantic_dict
+            .insert(*hash.as_bytes(), concept);
+
+        let packet = titanium_host::types::NexoPacket {
+            fragment_id: 0,
+            payload: *hash.as_bytes(),
+            provenance: titanium_host::types::Provenance::default(),
+        };
+
+        let bytes = postcard::to_allocvec(&packet)?;
+        let ptr = get_ingest.call(&mut *store, ())?;
+        memory.write(&mut *store, ptr as usize, &bytes)?;
+        let _ = ingest.call(&mut *store, (ptr, bytes.len() as u32))?;
+    }
+
+    println!("[+] Matriz Neural pré-aquecida com sucesso!");
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=========================================================");
@@ -132,6 +196,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ingest_packet = instance.get_typed_func::<(u32, u32), u32>(&mut _store, "ingest_packet")?;
 
     println!("[+] NexoIA operando na Arquitetura Nível 6. Reflexo Neural Ativo.");
+
+    // Missão 8.2: Bootstrapping Semântico
+    if let Err(e) = bootstrap_knowledge(
+        std::path::Path::new("knowledge.json"),
+        &mut _store,
+        &_memory,
+        &get_ingest_buffer_ptr,
+        &ingest_packet,
+    )
+    .await
+    {
+        eprintln!(
+            "[-] Falha ao inicializar a Ingestão de Conhecimento: {:?}",
+            e
+        );
+    }
 
     // Loop principal da Borda (Escutando os pacotes)
     // Em produção, isso alimentará a Quinn (QUIC Endpoint)

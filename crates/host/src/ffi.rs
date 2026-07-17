@@ -1,5 +1,10 @@
+use crate::memory::SemanticMemoryStore;
 use serde::Serialize;
 use wasmtime::{Caller, Linker};
+
+pub struct HostState {
+    pub memory_store: SemanticMemoryStore,
+}
 
 #[derive(Serialize)]
 pub struct ManifestoDummy {
@@ -8,11 +13,11 @@ pub struct ManifestoDummy {
     pub directives: Vec<String>,
 }
 
-pub fn setup_linker(linker: &mut Linker<()>) -> Result<(), wasmtime::Error> {
+pub fn setup_linker(linker: &mut Linker<HostState>) -> Result<(), wasmtime::Error> {
     linker.func_wrap(
         "env",
         "request_manifest",
-        |mut caller: Caller<'_, ()>, ptr: u32, max_len: u32| -> u32 {
+        |mut caller: Caller<'_, HostState>, ptr: u32, max_len: u32| -> u32 {
             let manifesto = ManifestoDummy {
                 name: "NexoIA Cortex".to_string(),
                 version: "0.4.1".to_string(),
@@ -44,9 +49,22 @@ pub fn setup_linker(linker: &mut Linker<()>) -> Result<(), wasmtime::Error> {
     linker.func_wrap(
         "env",
         "request_fragment_by_id",
-        |_caller: Caller<'_, ()>, _id: u64, _ptr: u32, _max_len: u32| -> u32 {
+        |_caller: Caller<'_, HostState>, _id: u64, _ptr: u32, _max_len: u32| -> u32 {
             // Dummy implementation for now (Zero-Copy mmap will go here)
             0
+        },
+    )?;
+
+    linker.func_wrap(
+        "env",
+        "forget_active_context",
+        |mut caller: Caller<'_, HostState>, fragment_id: u64| -> u32 {
+            // O Active Forgetting: Queimando o ID da memória para ser evitado/limpo no Host
+            caller
+                .data_mut()
+                .memory_store
+                .mark_for_deletion(&[fragment_id]);
+            1 // 1 para Sucesso
         },
     )?;
 

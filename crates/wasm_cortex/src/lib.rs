@@ -55,6 +55,18 @@ static ALLOCATOR: BumpAllocator = BumpAllocator;
 extern "C" {
     fn request_manifest(ptr: *mut u8, max_len: usize) -> usize;
     fn request_fragment_by_id(id: u64, ptr: *mut u8, max_len: usize) -> usize;
+    fn forget_active_context(fragment_id: u64) -> u32;
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn forget_and_cleanup(fragment_id: u64, ptr: *mut u8, len: usize) {
+    unsafe {
+        let result = forget_active_context(fragment_id);
+        if result > 0 {
+            // A IA "queima" ativamente a memória da própria cabeça
+            core::ptr::write_bytes(ptr, 0, len);
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]

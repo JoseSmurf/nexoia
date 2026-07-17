@@ -11,6 +11,7 @@ pub mod hash;
 pub mod lgpd;
 pub mod lgpd_rights;
 pub mod limits;
+pub mod memory;
 pub mod network;
 pub mod nex;
 pub mod provenance;

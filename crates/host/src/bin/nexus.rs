@@ -1,7 +1,8 @@
 use crossbeam_skiplist::SkipList;
 use flurry::HashMap;
 use std::sync::Arc;
-use titanium_host::ffi;
+use titanium_host::ffi::{self, HostState};
+use titanium_host::memory::SemanticMemoryStore;
 use tokio::net::UdpSocket;
 use wasmtime::{Config, Engine, Linker, Memory, MemoryType, Store};
 
@@ -30,7 +31,7 @@ impl Default for GlobalConsciousness {
 }
 
 /// A Inicialização do Motor Wasmtime blindado
-pub fn initialize_wasm_engine() -> (Engine, Store<()>, Memory, Linker<()>) {
+pub fn initialize_wasm_engine() -> (Engine, Store<HostState>, Memory, Linker<HostState>) {
     let mut config = Config::new();
     // Previne Halting Problem limitando as execuções JIT
     config.consume_fuel(true);
@@ -38,7 +39,12 @@ pub fn initialize_wasm_engine() -> (Engine, Store<()>, Memory, Linker<()>) {
     config.wasm_simd(true);
 
     let engine = Engine::new(&config).expect("Falha ao inicializar o Motor Wasmtime Titânio");
-    let mut store = Store::new(&engine, ());
+
+    let state = HostState {
+        memory_store: SemanticMemoryStore::new(),
+    };
+
+    let mut store = Store::new(&engine, state);
     store.set_fuel(10_000_000).unwrap(); // Define Combustível inicial
 
     // O Titânio aloca a RAM bruta para o Córtex

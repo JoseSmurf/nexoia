@@ -1,10 +1,10 @@
 use anyhow::Result;
-use iroh::node::Node;
+use iroh::Endpoint;
 
 pub async fn start_p2p_node() -> Result<()> {
-    // 1. Inicia um nó Iroh anônimo/epêmero com store em memória
-    let node = Node::memory().spawn().await?;
-    let node_id = node.node_id();
+    // 1. Inicia um nó Iroh anônimo/epêmero
+    let endpoint = Endpoint::builder().bind().await?;
+    let node_id = endpoint.node_id();
 
     println!("🔥 Nó NexoIA online. ID P2P: {}", node_id);
 

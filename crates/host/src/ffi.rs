@@ -78,10 +78,9 @@ pub fn setup_linker(linker: &mut Linker<HostState>) -> Result<(), wasmtime::Erro
                 .expect("Failed to get memory");
 
             let data = memory.data(&caller);
-            
+
             let start = ptr as usize;
             let end = start + len as usize;
-            
             // Validação simples de bounds
             if end <= data.len() {
                 // Simulação de broadcast (O Reflexo Cognitivo)

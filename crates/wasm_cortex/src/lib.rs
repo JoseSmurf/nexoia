@@ -287,7 +287,11 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
             INGEST_COUNT += 1;
 
             // Registra o fragmento na tabela de conhecimento
-            (&mut *(&raw mut KNOWLEDGE_TABLE)).insert_or_update(reflex_fragment_id, strength, INGEST_COUNT);
+            (&mut *(&raw mut KNOWLEDGE_TABLE)).insert_or_update(
+                reflex_fragment_id,
+                strength,
+                INGEST_COUNT,
+            );
 
             // Ciclo REM: Sono Ativo a cada N ingestões
             if INGEST_COUNT % knowledge::REM_INTERVAL == 0 {

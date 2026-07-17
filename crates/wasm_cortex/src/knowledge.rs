@@ -134,12 +134,17 @@ impl KnowledgeTable {
         // Tabela cheia: substitui o de menor score (não-dirty primeiro,
         // depois dirty como fallback)
         let now_local = now;
-        let replace_idx = self.slots.iter().enumerate()
+        let replace_idx = self
+            .slots
+            .iter()
+            .enumerate()
             .filter(|(_, e)| !e.dirty)
             .min_by_key(|(_, e)| Self::entry_score_inner(e, now_local))
             .map(|(i, _)| i)
             .or_else(|| {
-                self.slots.iter().enumerate()
+                self.slots
+                    .iter()
+                    .enumerate()
                     .min_by_key(|(_, e)| Self::entry_score_inner(e, now_local))
                     .map(|(i, _)| i)
             });
@@ -318,8 +323,8 @@ mod tests {
     #[test]
     fn test_collect_dirty() {
         let mut table = KnowledgeTable::new();
-        table.insert_or_update(1, 10, 1);   // será esquecido
-        table.insert_or_update(2, 200, 1);  // forte, permanece
+        table.insert_or_update(1, 10, 1); // será esquecido
+        table.insert_or_update(2, 200, 1); // forte, permanece
         table.decay(200);
         let mut buf = [0u64; 64];
         let count = table.collect_dirty(&mut buf);

@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(target_arch = "wasm32", no_std)]
 extern crate alloc;
 #[cfg(target_arch = "wasm32")]
 use core::arch::wasm32::*;
@@ -107,12 +107,8 @@ pub unsafe extern "C" fn process_neural_tensor(ptr: *const TensorBlock, blocks: 
     lane0 + lane1 + lane2 + lane3
 }
 
-#[cfg(not(test))]
+#[cfg(target_arch = "wasm32")]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    #[cfg(target_arch = "wasm32")]
     core::arch::wasm32::unreachable();
-
-    #[cfg(not(target_arch = "wasm32"))]
-    loop {}
 }

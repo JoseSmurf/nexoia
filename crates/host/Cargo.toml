@@ -48,6 +48,7 @@ postcard = { version = "1", features = ["alloc"] }
 rkyv = "0.7"
 anyhow = "1.0"
 iroh = "1.0.2"
+iroh-gossip = "0.101.0"
 [dev-dependencies]
 tempfile = "3"
 tower = { version = "0.4", features = ["util"] }

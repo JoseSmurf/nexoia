@@ -28,7 +28,7 @@ pub async fn start_p2p_node(
 
     // 4. Laço de Ingestão e Transmissão
     tokio::spawn(async move {
-        let (mut broadcast, mut events) = gossip_topic.split();
+        let (broadcast, mut events) = gossip_topic.split();
         let mut events = events.fuse();
         loop {
             tokio::select! {

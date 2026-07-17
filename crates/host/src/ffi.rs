@@ -4,6 +4,7 @@ use wasmtime::{Caller, Linker};
 
 pub struct HostState {
     pub memory_store: SemanticMemoryStore,
+    pub p2p_tx: tokio::sync::mpsc::Sender<bytes::Bytes>,
 }
 
 #[derive(Serialize)]
@@ -83,8 +84,8 @@ pub fn setup_linker(linker: &mut Linker<HostState>) -> Result<(), wasmtime::Erro
             let end = start + len as usize;
             // Validação simples de bounds
             if end <= data.len() {
-                // Simulação de broadcast (O Reflexo Cognitivo)
-                println!("🚀 [HOST] Reflexo Cognitivo: Córtex Wasm propagou um pacote de {} bytes para a rede P2P.", len);
+                let packet_bytes = bytes::Bytes::copy_from_slice(&data[start..end]);
+                let _ = caller.data_mut().p2p_tx.try_send(packet_bytes);
                 1
             } else {
                 0

@@ -31,7 +31,9 @@ impl Default for GlobalConsciousness {
 }
 
 /// A Inicialização do Motor Wasmtime blindado
-pub fn initialize_wasm_engine() -> (Engine, Store<HostState>, Memory, Linker<HostState>) {
+pub fn initialize_wasm_engine(
+    p2p_tx: tokio::sync::mpsc::Sender<bytes::Bytes>,
+) -> (Engine, Store<HostState>, Memory, Linker<HostState>) {
     let mut config = Config::new();
     // Previne Halting Problem limitando as execuções JIT
     config.consume_fuel(true);
@@ -42,6 +44,7 @@ pub fn initialize_wasm_engine() -> (Engine, Store<HostState>, Memory, Linker<Hos
 
     let state = HostState {
         memory_store: SemanticMemoryStore::new(),
+        p2p_tx,
     };
 
     let mut store = Store::new(&engine, state);
@@ -73,15 +76,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Cria o canal
     let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+    let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel(100);
 
     // 2. Inicialização do Motor Wasm Isolado e Mapeamento de RAM
-    let (_engine, mut _store, _memory, _linker) = initialize_wasm_engine();
+    let (_engine, mut _store, _memory, _linker) = initialize_wasm_engine(outbound_tx);
     println!(
         "[*] Córtex Wasmtime Armado. Modo SIMD ativo. Proteção de Fuel (Halting-Problem) ativa."
     );
 
     // 3. Inicialização da Rede P2P Iroh (O Sistema Nervoso)
-    if let Err(e) = titanium_host::p2p::start_p2p_node(tx).await {
+    if let Err(e) = titanium_host::p2p::start_p2p_node(tx, outbound_rx).await {
         eprintln!("[-] Falha crítica ao iniciar nó P2P: {:?}", e);
     }
 

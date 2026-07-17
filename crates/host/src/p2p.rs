@@ -2,10 +2,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use iroh::{endpoint::presets, protocol::Router, Endpoint};
-use iroh_gossip::{
-    net::{Event, Gossip},
-    TopicId, ALPN,
-};
+use iroh_gossip::{api::Event, net::Gossip, TopicId, ALPN};
 use tokio::sync::mpsc;
 
 pub async fn start_p2p_node(
@@ -19,12 +16,14 @@ pub async fn start_p2p_node(
     println!("🔥 Nó NexoIA online. ID P2P: {}", node_id);
 
     // 2. Constrói o protocolo Gossip e o Roteador
-    let gossip = Gossip::builder().spawn(endpoint.clone()).await?;
+    let gossip = Gossip::builder()
+        .spawn(endpoint.clone())
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     let _router = Router::builder(endpoint)
         .accept(ALPN, gossip.clone())
         .spawn()
-        .await?;
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     // 3. Define o Tópico Neural do Enxame
     let topic_id = TopicId::from_bytes([23u8; 32]);

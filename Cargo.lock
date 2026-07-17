@@ -5228,6 +5228,7 @@ dependencies = [
  "crossbeam-skiplist",
  "ed25519-dalek 2.2.0",
  "flurry",
+ "futures-util",
  "hex",
  "hkdf",
  "hyper-util",

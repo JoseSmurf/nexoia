@@ -124,7 +124,7 @@ async fn bootstrap_knowledge(
         let bytes = postcard::to_allocvec(&packet)?;
         let ptr = get_ingest.call(&mut *store, ())?;
         memory.write(&mut *store, ptr as usize, &bytes)?;
-        store.add_fuel(10_000).unwrap();
+        store.set_fuel(10_000).unwrap();
         let _ = ingest.call(&mut *store, (ptr, bytes.len() as u32))?;
     }
 
@@ -226,7 +226,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Write into Wasm memory
                 _memory.write(&mut _store, ptr as usize, &packet)?;
 
-                _store.add_fuel(10_000).unwrap();
+                _store.set_fuel(10_000).unwrap();
                 let result = ingest_packet.call(&mut _store, (ptr, packet.len() as u32))?;
                 match result {
                     1 => println!("[+] Wasm: Pacote assimilado via Zero-Copy!"),
@@ -263,7 +263,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let ptr = get_ingest_buffer_ptr.call(&mut _store, ())?;
                     _memory.write(&mut _store, ptr as usize, &bytes)?;
 
-                    _store.add_fuel(10_000).unwrap();
+                    _store.set_fuel(10_000).unwrap();
                     let result = ingest_packet.call(&mut _store, (ptr, bytes.len() as u32))?;
                     match result {
                         1 => println!("[+] Córtex Absorveu a Mensagem!"),

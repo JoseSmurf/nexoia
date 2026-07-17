@@ -5,6 +5,9 @@ use core::arch::wasm32::*;
 #[cfg(target_arch = "wasm32")]
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+pub mod eval;
+pub mod provenance;
+
 #[cfg(target_arch = "wasm32")]
 const PAGE_SIZE: usize = 65536; // 64 KB por página Wasm
 

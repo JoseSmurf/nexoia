@@ -24,7 +24,7 @@ pub async fn start_p2p_node(
 
     // 3. Define o Tópico Neural do Enxame
     let topic_id = TopicId::from_bytes([23u8; 32]);
-    let (gossip_sender, mut gossip_receiver) = gossip.subscribe(topic_id, vec![]).await?;
+    let mut gossip_topic = gossip.subscribe(topic_id, vec![]).await?;
 
     // 4. Laço de Ingestão e Transmissão
     tokio::spawn(async move {
@@ -32,9 +32,9 @@ pub async fn start_p2p_node(
             tokio::select! {
                 Some(packet) = outbound_rx.recv() => {
                     println!("🌐 [P2P ROUTER] Transmitindo reflexo de {} bytes para o enxame Iroh...", packet.len());
-                    let _ = gossip_sender.broadcast(packet).await;
+                    let _ = gossip_topic.broadcast(packet).await;
                 }
-                event = gossip_receiver.next() => {
+                event = gossip_topic.next() => {
                     if let Some(Ok(Event::Received(msg))) = event {
                         if msg.content.len() <= 1024 {
                             let _ = tx.send(msg.content).await;

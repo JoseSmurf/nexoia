@@ -1,4 +1,3 @@
-#![no_std]
 use crate::provenance::Provenance;
 use serde::{Deserialize, Serialize};
 

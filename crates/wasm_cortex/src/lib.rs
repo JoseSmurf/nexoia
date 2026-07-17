@@ -131,11 +131,19 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable();
 }
 
+/// Buffer persistente na seção de dados do Wasm (imune a alloca/stack-reuse do LLVM).
+/// O backend LLVM para Wasm pode reutilizar o shadow stack de variáveis locais
+/// (`[0u8; 256]` stack-local) ANTES do `broadcast_packet` ler os dados,
+/// resultando em payload zerado no Host. Este static garante que a memória
+/// permaneça válida durante toda a chamada FFI síncrona.
+#[cfg(target_arch = "wasm32")]
+static mut REFLEX_BUFFER: [u8; 256] = [0; 256];
+
 #[cfg(target_arch = "wasm32")]
 pub fn emit_neural_reflex(packet: &schema::NexoPacket) {
-    let mut buffer = [0u8; 256]; // Stack buffer for zero dynamic allocation
-    if let Ok(slice) = postcard::to_slice(packet, &mut buffer) {
-        unsafe {
+    unsafe {
+        let buf: &mut [u8] = &mut REFLEX_BUFFER;
+        if let Ok(slice) = postcard::to_slice(packet, buf) {
             broadcast_packet(slice.as_ptr(), slice.len());
         }
     }

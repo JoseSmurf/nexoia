@@ -7,6 +7,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 pub mod eval;
 pub mod provenance;
+pub mod schema;
 
 #[cfg(target_arch = "wasm32")]
 const PAGE_SIZE: usize = 65536; // 64 KB por página Wasm
@@ -127,4 +128,22 @@ pub unsafe extern "C" fn process_neural_tensor(ptr: *const TensorBlock, blocks: 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable();
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
+    unsafe {
+        let slice = core::slice::from_raw_parts(ptr, len);
+
+        // Tenta decodificar o pacote sem alocar memória dinâmica
+        if let Ok(_packet) = postcard::from_bytes::<schema::NexoPacket>(slice) {
+            // O pacote foi compreendido pela IA.
+            // Futuramente ele será passado para o eval.rs aqui.
+            return 1;
+        }
+
+        // Falha na decodificação ou pacote corrompido
+        return 0;
+    }
 }

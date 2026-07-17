@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 pub const MAX_PROVENANCE: usize = 12;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Provenance {
     pub fragments: [u64; MAX_PROVENANCE],
     pub influence: [u8; MAX_PROVENANCE],

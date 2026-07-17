@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bytes::Bytes;
-use futures_util::{StreamExt, stream::FusedStream};
+use futures_util::{stream::FusedStream, StreamExt};
 use iroh::{endpoint::presets, protocol::Router, Endpoint};
 use iroh_gossip::{api::Event, net::Gossip, TopicId, ALPN};
 use tokio::sync::mpsc;

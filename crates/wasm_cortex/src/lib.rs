@@ -60,6 +60,7 @@ extern "C" {
     fn request_manifest(ptr: *mut u8, max_len: usize) -> usize;
     fn request_fragment_by_id(id: u64, ptr: *mut u8, max_len: usize) -> usize;
     fn forget_active_context(fragment_id: u64) -> u32;
+    fn broadcast_packet(ptr: *const u8, len: usize) -> u32;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -131,15 +132,51 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 }
 
 #[cfg(target_arch = "wasm32")]
+pub fn emit_neural_reflex(packet: &schema::NexoPacket) {
+    let mut buffer = [0u8; 256]; // Stack buffer for zero dynamic allocation
+    if let Ok(slice) = postcard::to_slice(packet, &mut buffer) {
+        unsafe {
+            broadcast_packet(slice.as_ptr(), slice.len());
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
     unsafe {
         let slice = core::slice::from_raw_parts(ptr, len);
 
         // Tenta decodificar o pacote sem alocar memória dinâmica
-        if let Ok(_packet) = postcard::from_bytes::<schema::NexoPacket>(slice) {
-            // O pacote foi compreendido pela IA.
-            // Futuramente ele será passado para o eval.rs aqui.
+        if let Ok(packet) = postcard::from_bytes::<schema::NexoPacket>(slice) {
+            // 1. Converte as informações para um RuntimeState (mock de extração)
+            let value = f32::from_le_bytes(packet.payload[0..4].try_into().unwrap_or([0; 4]));
+            let strength = packet.payload[4];
+
+            let received_state = eval::RuntimeState {
+                value,
+                strength,
+                provenance: packet.provenance,
+            };
+
+            // 2. Cria o estado base representando a "crença atual"
+            let current_state = eval::RuntimeState {
+                value: 1.0,
+                strength: 128,
+                provenance: provenance::Provenance::default(),
+            };
+
+            // 3. Verifica a matemática da contradição
+            let score = eval::calculate_contradiction_score(&current_state, &received_state);
+
+            if score > 0.8 {
+                // Dissonância muito alta, pacote rejeitado cognitivamente
+                return 2;
+            }
+
+            // Pacote aceito e enriquecido. "Bate" de volta!
+            emit_neural_reflex(&packet);
+
             return 1;
         }
 

@@ -68,5 +68,30 @@ pub fn setup_linker(linker: &mut Linker<HostState>) -> Result<(), wasmtime::Erro
         },
     )?;
 
+    linker.func_wrap(
+        "env",
+        "broadcast_packet",
+        |mut caller: Caller<'_, HostState>, ptr: u32, len: u32| -> u32 {
+            let memory = caller
+                .get_export("memory")
+                .and_then(|e| e.into_memory())
+                .expect("Failed to get memory");
+
+            let data = memory.data(&caller);
+            
+            let start = ptr as usize;
+            let end = start + len as usize;
+            
+            // Validação simples de bounds
+            if end <= data.len() {
+                // Simulação de broadcast (O Reflexo Cognitivo)
+                println!("🚀 [HOST] Reflexo Cognitivo: Córtex Wasm propagou um pacote de {} bytes para a rede P2P.", len);
+                1
+            } else {
+                0
+            }
+        },
+    )?;
+
     Ok(())
 }

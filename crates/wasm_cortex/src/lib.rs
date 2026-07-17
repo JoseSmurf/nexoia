@@ -158,6 +158,17 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
 
         // Tenta decodificar o pacote sem alocar memória dinâmica
         if let Ok(packet) = postcard::from_bytes::<schema::NexoPacket>(slice) {
+            // ════════════════════════════════════════════════════════════
+            // PRESERVAÇÃO DO PAYLOAD: cópia local explícita ANTES de
+            // qualquer operação de leitura ou desestruturação.
+            // Impede que o Wasm compiler re-use a memória do slice
+            // ou que o bind do payload seja ofuscado por otimizações
+            // que zerem o campo no pacote refletido.
+            // ════════════════════════════════════════════════════════════
+            let reflex_payload: [u8; 32] = packet.payload;
+            let reflex_provenance: provenance::Provenance = packet.provenance;
+            let reflex_fragment_id: u64 = packet.fragment_id;
+
             // 1. Converte as informações para um RuntimeState
             let value = f32::from_le_bytes(packet.payload[0..4].try_into().unwrap_or([0; 4]));
             let strength = packet.payload[4];
@@ -192,8 +203,13 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
                 CORTEX_VALUE = CORTEX_VALUE * 0.3 + value * 0.7;
                 CORTEX_STRENGTH = ((CORTEX_STRENGTH as u16 * 3 + strength as u16 * 7) / 10) as u8;
 
-                // Emite reflexo neural — a anomalia foi detectada e está sendo processada
-                emit_neural_reflex(&packet);
+                // Constrói pacote de reflexo com payload preservado explicitamente
+                let reflex = schema::NexoPacket {
+                    fragment_id: reflex_fragment_id,
+                    payload: reflex_payload,
+                    provenance: reflex_provenance,
+                };
+                emit_neural_reflex(&reflex);
                 return 3; // Código 3 = Expansão Cognitiva (novo estado absorvido)
             }
 
@@ -202,7 +218,12 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
             CORTEX_STRENGTH = ((CORTEX_STRENGTH as u16 * 9 + strength as u16) / 10) as u8;
 
             // Pacote aceito e enriquecido. "Bate" de volta!
-            emit_neural_reflex(&packet);
+            let reflex = schema::NexoPacket {
+                fragment_id: reflex_fragment_id,
+                payload: reflex_payload,
+                provenance: reflex_provenance,
+            };
+            emit_neural_reflex(&reflex);
 
             return 1;
         }

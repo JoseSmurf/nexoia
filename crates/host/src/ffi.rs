@@ -5,6 +5,7 @@ use wasmtime::{Caller, Linker};
 pub struct HostState {
     pub memory_store: SemanticMemoryStore,
     pub p2p_tx: tokio::sync::mpsc::Sender<bytes::Bytes>,
+    pub wal: crate::storage::WalBuffer,
 }
 
 #[derive(Serialize)]

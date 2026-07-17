@@ -18,4 +18,5 @@ pub mod p2p;
 pub mod provenance;
 pub mod quality;
 pub mod state;
+pub mod storage;
 pub mod types;

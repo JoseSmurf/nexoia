@@ -71,6 +71,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _consciousness = Arc::new(GlobalConsciousness::default());
     println!("[*] Consciência Global Lock-Free alocada com Sucesso.");
 
+    // 1. Cria o canal
+    let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+
     // 2. Inicialização do Motor Wasm Isolado e Mapeamento de RAM
     let (_engine, mut _store, _memory, _linker) = initialize_wasm_engine();
     println!(
@@ -78,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 3. Inicialização da Rede P2P Iroh (O Sistema Nervoso)
-    if let Err(e) = titanium_host::p2p::start_p2p_node().await {
+    if let Err(e) = titanium_host::p2p::start_p2p_node(tx).await {
         eprintln!("[-] Falha crítica ao iniciar nó P2P: {:?}", e);
     }
 
@@ -90,13 +93,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         edge_addr
     );
 
-    println!("[+] NexoIA operando na Arquitetura Nível 6.");
+    println!("[+] Carregando o binário Wasm Cortex...");
+    let wasm_bytes = std::fs::read("target/wasm32-unknown-unknown/debug/wasm_cortex.wasm")
+        .expect("Failed to read Wasm cortex! Did you run `cargo build -p wasm_cortex --target wasm32-unknown-unknown`?");
+    let module = wasmtime::Module::new(&_engine, &wasm_bytes)?;
+    let instance = _linker.instantiate(&mut _store, &module)?;
+
+    println!("[+] Extraindo funções FFI da Sinapse...");
+    let get_ingest_buffer_ptr =
+        instance.get_typed_func::<(), u32>(&mut _store, "get_ingest_buffer_ptr")?;
+    let ingest_packet = instance.get_typed_func::<(u32, u32), u32>(&mut _store, "ingest_packet")?;
+
+    println!("[+] NexoIA operando na Arquitetura Nível 6. Reflexo Neural Ativo.");
 
     // Loop principal da Borda (Escutando os pacotes)
     // Em produção, isso alimentará a Quinn (QUIC Endpoint)
     let mut buf = [0; 65535];
     loop {
-        let (_len, _src) = socket.recv_from(&mut buf).await?;
-        // Validação de Hashcash e NanoEpa aqui, ANTES de ceder Memória
+        tokio::select! {
+            Some(packet) = rx.recv() => {
+                println!("[*] P2P -> Wasm: Recebendo {} bytes da rede", packet.len());
+                let ptr = get_ingest_buffer_ptr.call(&mut _store, ())?;
+
+                // Write into Wasm memory
+                _memory.write(&mut _store, ptr as usize, &packet)?;
+
+                let result = ingest_packet.call(&mut _store, (ptr, packet.len() as u32))?;
+                if result == 1 {
+                    println!("[+] Wasm: Pacote compreendido e decodificado via Zero-Copy!");
+                } else {
+                    println!("[-] Wasm: Falha na decodificação do pacote (pacote corrompido ou schema inválido).");
+                }
+            }
+            res = socket.recv_from(&mut buf) => {
+                if let Ok((_len, _src)) = res {
+                    // Validação de Hashcash e NanoEpa aqui, ANTES de ceder Memória
+                }
+            }
+        }
     }
 }

@@ -1,7 +1,9 @@
 use anyhow::Result;
+use bytes::Bytes;
 use iroh::{endpoint::presets, Endpoint};
+use tokio::sync::mpsc;
 
-pub async fn start_p2p_node() -> Result<()> {
+pub async fn start_p2p_node(tx: mpsc::Sender<Bytes>) -> Result<()> {
     // 1. Inicia um nó Iroh anônimo/epêmero
     let endpoint = Endpoint::builder(presets::N0).bind().await?;
     let node_id = endpoint.id();
@@ -10,9 +12,12 @@ pub async fn start_p2p_node() -> Result<()> {
 
     // 2. Trava o nó escutando em uma task separada (placeholder para o loop de roteamento)
     tokio::spawn(async move {
-        // Futuro listener de pacotes e chamadas FFI
+        // Simulando a chegada de um pacote UDP P2P
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+            // Dummy payload (vamos disparar falhas propositais no schema primeiro)
+            let dummy_data = Bytes::from_static(&[0u8; 64]);
+            let _ = tx.send(dummy_data).await;
         }
     });
 

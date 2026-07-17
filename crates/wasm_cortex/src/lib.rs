@@ -147,3 +147,11 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
         return 0;
     }
 }
+
+static mut INGEST_BUFFER: [u8; 1024] = [0; 1024];
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn get_ingest_buffer_ptr() -> *mut u8 {
+    unsafe { core::ptr::addr_of_mut!(INGEST_BUFFER) as *mut u8 }
+}

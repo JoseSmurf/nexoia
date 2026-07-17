@@ -141,6 +141,15 @@ pub fn emit_neural_reflex(packet: &schema::NexoPacket) {
     }
 }
 
+/// Estado Cognitivo Persistente do Córtex.
+/// Seguro em Wasm: single-threaded por design, sem data races possíveis.
+#[cfg(target_arch = "wasm32")]
+static mut CORTEX_VALUE: f32 = 1.0;
+#[cfg(target_arch = "wasm32")]
+static mut CORTEX_STRENGTH: u8 = 128;
+#[cfg(target_arch = "wasm32")]
+static mut INGEST_COUNT: u32 = 0;
+
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
@@ -149,7 +158,7 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
 
         // Tenta decodificar o pacote sem alocar memória dinâmica
         if let Ok(packet) = postcard::from_bytes::<schema::NexoPacket>(slice) {
-            // 1. Converte as informações para um RuntimeState (mock de extração)
+            // 1. Converte as informações para um RuntimeState
             let value = f32::from_le_bytes(packet.payload[0..4].try_into().unwrap_or([0; 4]));
             let strength = packet.payload[4];
 
@@ -159,20 +168,38 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
                 provenance: packet.provenance,
             };
 
-            // 2. Cria o estado base representando a "crença atual"
+            // 2. Cria o estado base a partir da memória persistente do Córtex
             let current_state = eval::RuntimeState {
-                value: 1.0,
-                strength: 128,
+                value: CORTEX_VALUE,
+                strength: CORTEX_STRENGTH,
                 provenance: provenance::Provenance::default(),
             };
 
             // 3. Verifica a matemática da contradição
             let score = eval::calculate_contradiction_score(&current_state, &received_state);
 
+            INGEST_COUNT += 1;
+
             if score > 0.8 {
-                // Dissonância muito alta, pacote rejeitado cognitivamente
-                return 2;
+                // ══════════════════════════════════════════════════════
+                // EXPANSÃO COGNITIVA: Abraçando a Entropia Semântica
+                // ══════════════════════════════════════════════════════
+                // Em vez de rejeitar, o Córtex ADAPTA seu estado base
+                // convergindo em direção ao sinal recebido.
+                // Quanto mais pacotes ele absorve, mais flexível ele se torna.
+
+                // Convergência gradual: média ponderada do estado atual com o novo sinal
+                CORTEX_VALUE = CORTEX_VALUE * 0.3 + value * 0.7;
+                CORTEX_STRENGTH = ((CORTEX_STRENGTH as u16 * 3 + strength as u16 * 7) / 10) as u8;
+
+                // Emite reflexo neural — a anomalia foi detectada e está sendo processada
+                emit_neural_reflex(&packet);
+                return 3; // Código 3 = Expansão Cognitiva (novo estado absorvido)
             }
+
+            // Dissonância dentro do limiar: assimilação suave
+            CORTEX_VALUE = CORTEX_VALUE * 0.9 + value * 0.1;
+            CORTEX_STRENGTH = ((CORTEX_STRENGTH as u16 * 9 + strength as u16) / 10) as u8;
 
             // Pacote aceito e enriquecido. "Bate" de volta!
             emit_neural_reflex(&packet);
@@ -181,7 +208,7 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
         }
 
         // Falha na decodificação ou pacote corrompido
-        return 0;
+        0
     }
 }
 

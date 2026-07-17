@@ -226,10 +226,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 _memory.write(&mut _store, ptr as usize, &packet)?;
 
                 let result = ingest_packet.call(&mut _store, (ptr, packet.len() as u32))?;
-                if result == 1 {
-                    println!("[+] Wasm: Pacote compreendido e decodificado via Zero-Copy!");
-                } else {
-                    println!("[-] Wasm: Falha na decodificação do pacote (pacote corrompido ou schema inválido).");
+                match result {
+                    1 => println!("[+] Wasm: Pacote assimilado via Zero-Copy!"),
+                    3 => println!("[⚡] Wasm: Expansão Cognitiva! O Córtex absorveu uma anomalia."),
+                    _ => println!("[-] Wasm: Falha na decodificação do pacote."),
                 }
 
                 // Gatilho do Garbage Collector a Frio (Snapshot Zstd)
@@ -261,8 +261,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let ptr = get_ingest_buffer_ptr.call(&mut _store, ())?;
                     _memory.write(&mut _store, ptr as usize, &bytes)?;
 
-                    if ingest_packet.call(&mut _store, (ptr, bytes.len() as u32))? == 1 {
-                        println!("[+] Córtex Absorveu a Mensagem!");
+                    let result = ingest_packet.call(&mut _store, (ptr, bytes.len() as u32))?;
+                    match result {
+                        1 => println!("[+] Córtex Absorveu a Mensagem!"),
+                        3 => println!("[⚡] Expansão Cognitiva! O Córtex adaptou-se à sua entropia."),
+                        _ => println!("[-] Córtex rejeitou o pacote."),
                     }
                 }
             }

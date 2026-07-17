@@ -1,6 +1,7 @@
+use crate::memory::SemanticMemoryStore;
 use memmap2::MmapMut;
 use std::fs::OpenOptions;
-use std::io::{self, Error, ErrorKind};
+use std::io::{self, Error, ErrorKind, Write};
 use std::path::Path;
 
 const WAL_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
@@ -117,4 +118,57 @@ impl WalBuffer {
     pub fn flush(&self) -> io::Result<()> {
         self.mmap.flush()
     }
+
+    /// Retorna o tamanho atual ocupado no WAL
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    /// Limpa a lousa do WAL. Chamado após a consolidação do Snapshot de longo prazo.
+    pub fn reset(&mut self) -> io::Result<()> {
+        self.cursor = 0;
+        self.mmap.fill(0);
+        self.mmap.flush()
+    }
+}
+
+/// Congela a memória a quente em um arquivo a frio persistente com compressão Zstd.
+/// Implementa Rotação Atômica (tmp -> rename) para proteção contra queda de energia.
+pub fn create_snapshot(memory: &SemanticMemoryStore, path: &Path) -> io::Result<()> {
+    // 1. Serialização (Zero-Copy onde aplicável, mas aloca um vetor na host)
+    let payload = postcard::to_allocvec(memory).map_err(|e| {
+        Error::new(
+            ErrorKind::InvalidData,
+            format!("Falha ao serializar a memória: {}", e),
+        )
+    })?;
+
+    // 2. Compressão em memória
+    let compressed_payload = zstd::stream::encode_all(payload.as_slice(), 0)?;
+
+    // 3. Assinatura Criptográfica
+    let hash = blake3::hash(&compressed_payload);
+
+    // 4. Arquivo Temporário para Rotação Atômica
+    let tmp_path = path.with_extension("zst.tmp");
+    {
+        let mut tmp_file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp_path)?;
+
+        // Escreve o Cabeçalho (Hash) + Dados Comprimidos
+        tmp_file.write_all(hash.as_bytes())?;
+        tmp_file.write_all(&compressed_payload)?;
+
+        // 5. Garantia física (Sync)
+        tmp_file.sync_all()?;
+    } // tmp_file é fechado aqui
+
+    // 6. Rotação Atômica
+    std::fs::rename(&tmp_path, path)?;
+
+    println!("🧊 [SNAPSHOT] Consciência congelada com sucesso no disco de Titânio. {} bytes comprimidos.", compressed_payload.len());
+    Ok(())
 }

@@ -132,6 +132,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     println!("[-] Wasm: Falha na decodificação do pacote (pacote corrompido ou schema inválido).");
                 }
+
+                // Gatilho do Garbage Collector a Frio (Snapshot Zstd)
+                if _store.data().wal.cursor() > 1024 * 1024 {
+                    println!("[*] Medula WAL atingiu limite de 1MB. Congelando Engrama (Snapshot Zstd)...");
+                    let path = std::path::Path::new("nexo_brain.zst");
+                    if let Err(e) = titanium_host::storage::create_snapshot(&_store.data().memory_store, path) {
+                        eprintln!("[-] Falha crítica ao congelar o Engrama: {:?}", e);
+                    } else if let Err(e) = _store.data_mut().wal.reset() {
+                        eprintln!("[-] Falha crítica ao limpar o WAL após Snapshot: {:?}", e);
+                    } else {
+                        println!("[+] Medula WAL limpa e pronta para novos registros.");
+                    }
+                }
             }
             res = socket.recv_from(&mut buf) => {
                 if let Ok((_len, _src)) = res {

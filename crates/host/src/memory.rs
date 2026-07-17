@@ -1,10 +1,12 @@
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+#[derive(Serialize, Deserialize)]
 pub struct FragmentMeta {
     pub offset: usize,
     pub len: usize,
 }
-
+#[derive(Serialize, Deserialize)]
 pub struct SemanticMemoryStore {
     // Futuramente usaremos memmap2::MmapMut aqui. Por enquanto, preparamos o terreno.
     pub index: HashMap<u64, FragmentMeta>,

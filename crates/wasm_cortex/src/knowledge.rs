@@ -1,28 +1,28 @@
-/// ────────────────────────────────────────────────────────────
-/// knowledge.rs — Tabela de Conhecimento do Córtex (Sono REM)
-/// ────────────────────────────────────────────────────────────
-///
-/// Gerencia o ciclo ativo de esquecimento (REM) no Wasm Cortex:
-///
-/// 1. **Inserção/Atualização**: cada fragmento visto é registrado
-///    com sua força, recência e frequência de acesso.
-/// 2. **Decaimento**: a cada ciclo REM, strength de todos os
-///    fragmentos é reduzida à metade (divisão inteira).
-/// 3. **Critério Composto**: Força (50%) + Ressonância (30%) +
-///    Recência (20%) — calculado como score inteiro 0-255.
-/// 4. **Esquecimento**: fragmentos com score abaixo de
-///    `DECAY_THRESHOLD` são marcados como `dirty` e enviados
-///    ao Host via `batch_forget`.
-///
-/// O Host nunca deleta EPAs — apenas marca tombstones no índice
-/// ativo. O conhecimento esquecido pode ser re-aprendido.
-///
-/// # Alinhamento com a Visão
-///
-/// - O Córtex decide **autonomamente** o que esquecer.
-/// - O Host é executor, não juiz.
-/// - O critério é **matemático, determinístico e auditável**.
-/// - Nenhum conhecimento é destruído — apenas despriorizado.
+//! ────────────────────────────────────────────────────────────
+//! knowledge.rs — Tabela de Conhecimento do Córtex (Sono REM)
+//! ────────────────────────────────────────────────────────────
+//!
+//! Gerencia o ciclo ativo de esquecimento (REM) no Wasm Cortex:
+//!
+//! 1. **Inserção/Atualização**: cada fragmento visto é registrado
+//!    com sua força, recência e frequência de acesso.
+//! 2. **Decaimento**: a cada ciclo REM, strength de todos os
+//!    fragmentos é reduzida à metade (divisão inteira).
+//! 3. **Critério Composto**: Força (50%) + Ressonância (30%) +
+//!    Recência (20%) — calculado como score inteiro 0-255.
+//! 4. **Esquecimento**: fragmentos com score abaixo de
+//!    `DECAY_THRESHOLD` são marcados como `dirty` e enviados
+//!    ao Host via `batch_forget`.
+//!
+//! O Host nunca deleta EPAs — apenas marca tombstones no índice
+//! ativo. O conhecimento esquecido pode ser re-aprendido.
+//!
+//! # Alinhamento com a Visão
+//!
+//! - O Córtex decide **autonomamente** o que esquecer.
+//! - O Host é executor, não juiz.
+//! - O critério é **matemático, determinístico e auditável**.
+//! - Nenhum conhecimento é destruído — apenas despriorizado.
 
 /// Número máximo de fragmentos monitorados simultaneamente.
 pub const KNOWLEDGE_TABLE_SIZE: usize = 64;
@@ -69,6 +69,12 @@ pub struct KnowledgeTable {
     pub slots: [KnowledgeEntry; KNOWLEDGE_TABLE_SIZE],
     /// Quantos slots estão ocupados (fragment_id != 0).
     pub count: u16,
+}
+
+impl Default for KnowledgeTable {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl KnowledgeTable {
@@ -184,7 +190,7 @@ impl KnowledgeTable {
         // ─── Ressonância (30%) ───
         // hit_count mede quantas vezes o fragmento foi re-acessado.
         // Quanto mais acessado, mais relevante para o Córtex.
-        let hit = (entry.hit_count.min(255)) as u16;
+        let hit = entry.hit_count.min(255);
         let resonance_weight = hit * 3;
 
         // ─── Recência (20%) ───

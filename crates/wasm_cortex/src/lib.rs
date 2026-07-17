@@ -67,7 +67,7 @@ extern "C" {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn forget_and_cleanup(fragment_id: u64, ptr: *mut u8, len: usize) {
+pub unsafe fn forget_and_cleanup(fragment_id: u64, ptr: *mut u8, len: usize) {
     unsafe {
         let result = forget_active_context(fragment_id);
         if result > 0 {
@@ -164,6 +164,7 @@ static mut REFLEX_GENERATION: u64 = 0;
 #[cfg(target_arch = "wasm32")]
 pub fn emit_neural_reflex(packet: &schema::NexoPacket) -> bool {
     unsafe {
+        #[allow(clippy::deref_addrof)]
         let buf: &mut [u8] = &mut *(&raw mut REFLEX_BUFFER);
         match postcard::to_slice(packet, buf) {
             Ok(slice) => {
@@ -233,7 +234,7 @@ fn rem_cycle() -> u32 {
         (&mut *tbl).decay(INGEST_COUNT);
 
         let mut dirty_buf = [0u64; knowledge::KNOWLEDGE_TABLE_SIZE];
-        let dirty_count = (&mut *tbl).collect_dirty(&mut dirty_buf);
+        let dirty_count = (&*tbl).collect_dirty(&mut dirty_buf);
 
         if dirty_count > 0 {
             let processed = batch_forget(dirty_buf.as_ptr(), dirty_count);
@@ -247,7 +248,7 @@ fn rem_cycle() -> u32 {
 
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
-pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
+pub unsafe extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
     unsafe {
         let slice = core::slice::from_raw_parts(ptr, len);
 
@@ -287,6 +288,7 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
             INGEST_COUNT += 1;
 
             // Registra o fragmento na tabela de conhecimento
+            #[allow(clippy::deref_addrof)]
             (&mut *(&raw mut KNOWLEDGE_TABLE)).insert_or_update(
                 reflex_fragment_id,
                 strength,
@@ -294,7 +296,7 @@ pub extern "C" fn ingest_packet(ptr: *const u8, len: usize) -> u32 {
             );
 
             // Ciclo REM: Sono Ativo a cada N ingestões
-            if INGEST_COUNT % knowledge::REM_INTERVAL == 0 {
+            if INGEST_COUNT.is_multiple_of(knowledge::REM_INTERVAL) {
                 rem_cycle();
             }
 

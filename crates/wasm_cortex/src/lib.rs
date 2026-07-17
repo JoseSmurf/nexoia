@@ -34,6 +34,7 @@ pub unsafe extern "C" fn alloc_tensor(bytes: usize) -> *mut u8 {
     aligned as *mut u8
 }
 
+#[cfg(target_arch = "wasm32")]
 struct BumpAllocator;
 
 #[cfg(target_arch = "wasm32")]

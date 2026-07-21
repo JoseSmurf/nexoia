@@ -16,7 +16,7 @@ fn bench_btreemap_insert(c: &mut Criterion) {
         group.throughput(Throughput::Elements(size));
         group.bench_function(format!("{}_records", size), |b| {
             b.iter_batched(
-                || ProvenanceRegistry::new(),
+                ProvenanceRegistry::new,
                 |mut reg| {
                     for i in 0..size {
                         reg.record(LeafProvenance::new(i, LeafSource::BioLoopDigest, 0));
@@ -64,7 +64,7 @@ fn bench_mmr_append(c: &mut Criterion) {
         group.throughput(Throughput::Elements(size));
         group.bench_function(format!("{}_leaves", size), |b| {
             b.iter_batched(
-                || Mmr::new(),
+                Mmr::new,
                 |mut mmr| {
                     for i in 0..size {
                         mmr.append(leaf_hash((i & 0xFF) as u8));

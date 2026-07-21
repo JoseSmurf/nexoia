@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "bio_loop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "crossbeam-channel",
@@ -1440,7 +1440,7 @@ dependencies = [
 
 [[package]]
 name = "epoch_mmr"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "sha2 0.10.9",
@@ -1829,7 +1829,7 @@ dependencies = [
 
 [[package]]
 name = "gossip"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chiavdf",
  "crossbeam-channel",
@@ -5536,7 +5536,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "titanium_host"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "ahash 0.8.12",
@@ -6203,7 +6203,7 @@ dependencies = [
 
 [[package]]
 name = "wasm_cortex"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "postcard",
@@ -7323,7 +7323,7 @@ dependencies = [
 
 [[package]]
 name = "zk_prover"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "epoch_mmr",
  "sha2 0.10.9",

@@ -53,6 +53,11 @@ futures-util = "0.3.31"
 memmap2 = "0.9"
 zstd = "0.13"
 
+# NexoIA core crates (workspace path deps)
+bio_loop          = { path = "../../nexoia-core/bio_loop" }
+epoch_mmr         = { path = "../../nexoia-core/epoch_mmr" }
+crossbeam-channel = { workspace = true }
+
 [dev-dependencies]
 tempfile = "3"
 tower = { version = "0.4", features = ["util"] }

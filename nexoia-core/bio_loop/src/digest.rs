@@ -1,4 +1,4 @@
-use crossbeam_channel::{Receiver, RecvTimeoutError};
+use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use sha2::{Digest, Sha256};
 use std::{
     sync::{
@@ -78,6 +78,11 @@ pub struct Digestor {
     rx: Receiver<Event>,
     running: Arc<AtomicBool>,
     pub metrics: DigestorMetrics,
+    /// Canal opcional de saída de hashes.
+    /// Quando Some, cada `Event::Data` processado envia o SHA-256 resultante
+    /// ([u8; 32]) por `try_send` — zero alocação, non-blocking.
+    /// O receptor (tipicamente epoch_mmr::Mmr::append) consome em thread própria.
+    hash_tx: Option<Sender<[u8; 32]>>,
 }
 
 impl Digestor {
@@ -86,7 +91,15 @@ impl Digestor {
             rx,
             running,
             metrics: DigestorMetrics::new(),
+            hash_tx: None,
         }
+    }
+
+    /// Conecta um canal de saída de hashes ao Digestor.
+    /// Cada `Event::Data` processado terá seu SHA-256 enviado por `try_send`
+    /// neste canal — zero alocação, zero blocking.
+    pub fn set_hash_channel(&mut self, hash_tx: Sender<[u8; 32]>) {
+        self.hash_tx = Some(hash_tx);
     }
 
     /// Executa o loop principal de digestão. Bloqueia a thread chamadora.
@@ -166,8 +179,13 @@ impl Digestor {
                 self.metrics.processed.fetch_add(1, Ordering::Relaxed);
 
                 // `out` agora contém o SHA-256 do payload.
-                // TODO (Loop 2): encaminhar via canal para epoch_mmr::mmr::append(out)
-                let _ = out;
+                // Encaminha para o epoch_mmr via hash_tx (se conectado).
+                // `try_send` é non-blocking e zero-alloc — crossbeam copia
+                // os 32 bytes por memcpy. Se o canal estourar, o hash é
+                // dropped (backpressure natural).
+                if let Some(ref tx) = self.hash_tx {
+                    let _ = tx.try_send(*out);
+                }
             }
 
             Event::Heartbeat(tick) => {

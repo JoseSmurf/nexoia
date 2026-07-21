@@ -16,6 +16,7 @@ mod network;
 mod nex;
 mod pipeline;
 mod provenance;
+mod provenance_bridge;
 mod quality;
 mod state;
 mod types;
@@ -37,6 +38,7 @@ use crate::network::transport::{
 };
 use crate::nex::layers::NexLayer;
 use crate::pipeline::run_pipeline;
+use crate::provenance_bridge::ProvenanceBridge;
 use std::collections::HashMap;
 use std::error::Error;
 use std::net::SocketAddr;
@@ -458,6 +460,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         api_addr,
     };
     ctx.spawn_tasks(&checkpoint_rules);
+
+    // ── Provenance Bridge: Digestor + MMR em background ──
+    let provenance = ProvenanceBridge::spawn();
+    println!(
+        "Provenance:   bio-loop + epoch-mmr bridge active (membrane cap: {})",
+        bio_loop::digest::MEMBRANE_CAPACITY
+    );
+
     run_pipeline(
         &ctx.node,
         &ctx.peers,
@@ -468,6 +478,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &ctx.provenance_nodes,
         Some(Arc::clone(&ctx.reputation)),
         Some(derivation_index),
+        Some(&provenance),
     )
     .await?;
     println!("\nNode running. Press Ctrl+C to stop.");

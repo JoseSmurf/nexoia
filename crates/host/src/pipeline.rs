@@ -9,6 +9,7 @@ use crate::network::epa::SharedEPA;
 use crate::network::identity::NodeIdentity;
 use crate::network::persistence;
 use crate::network::transport::{PeerList, TrustedPeerList};
+use crate::provenance_bridge::ProvenanceBridge;
 use crate::state::State;
 use crate::types::EvidenceProvider;
 use serde::Serialize;
@@ -38,6 +39,10 @@ pub struct Manifest {
     pub lgpd: Option<LgpdMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lgpd_hash: Option<String>,
+    /// Raiz de Merkle da época atual do MMR (proveniência criptográfica).
+    /// Presente quando o pipeline recebe um `ProvenanceBridge` ativo.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub epoch_root: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -51,6 +56,7 @@ pub async fn run_pipeline(
     provenance_nodes: &Arc<RwLock<Vec<crate::provenance::ProvenanceNode>>>,
     reputation: Option<Arc<RwLock<crate::network::reputation::ReputationStore>>>,
     derivation_index: Option<Arc<RwLock<crate::provenance::DerivationIndex>>>,
+    provenance: Option<&ProvenanceBridge>,
 ) -> Result<(), Box<dyn Error>> {
     let limiter = crate::defense::RateLimiter::new(100, Duration::from_secs(60));
     let engine = crate::ai::EvidenceEngine::new(0.30);
@@ -148,12 +154,24 @@ pub async fn run_pipeline(
     write_text(out_dir.join("explain.json"), &explain_json)?;
     println!("{}", report.summary);
 
+    // ── Provenance Bridge: sela época atual e obtém raiz do MMR ──
+    let epoch_root = provenance.and_then(|p| {
+        let seal = p.seal_current_epoch()?;
+        let hex_root = hex::encode(seal.root);
+        println!(
+            "Provenance:   Epoch {} sealed, root={}, leaves={}",
+            seal.epoch, hex_root, seal.leaf_count
+        );
+        Some(hex_root)
+    });
+
     let manifest = build_manifest(
         &state,
         &decision,
         &state_json,
         &evidence_jsonl,
         &decisions_jsonl,
+        epoch_root.as_deref(),
     );
     let manifest_json = serde_json::to_string_pretty(&manifest)?;
     write_text(out_dir.join("manifest.json"), &manifest_json)?;
@@ -288,6 +306,7 @@ pub fn build_manifest(
     state_json: &str,
     evidence_jsonl: &str,
     decisions_jsonl: &str,
+    epoch_root: Option<&str>,
 ) -> Manifest {
     let (lgpd, lgpd_hash) = match &state.lgpd {
         Some(meta) => {
@@ -323,6 +342,7 @@ pub fn build_manifest(
         ],
         lgpd,
         lgpd_hash,
+        epoch_root: epoch_root.map(|s| s.to_string()),
     }
 }
 

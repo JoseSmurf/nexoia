@@ -16,6 +16,7 @@ pub mod network;
 pub mod nex;
 pub mod p2p;
 pub mod provenance;
+pub mod provenance_bridge;
 pub mod quality;
 pub mod state;
 pub mod storage;

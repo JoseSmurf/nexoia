@@ -179,6 +179,8 @@ impl Emitter {
 
     /// Tenta emitir um frame. Retorna Err se a fila de saída estiver cheia.
     /// NUNCA bloqueia — garante que o loop do bio_loop não seja atrasado.
+    // O `Err` carrega o frame de volta sem heap — intencional (hot path, zero alloc).
+    #[allow(clippy::result_large_err)]
     pub fn try_emit(&mut self, frame: NetworkFrame) -> Result<(), NetworkFrame> {
         match self.tx.try_send(frame) {
             Ok(()) => {

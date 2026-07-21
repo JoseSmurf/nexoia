@@ -7,3 +7,10 @@ authors.workspace   = true
 
 [dependencies]
 sha2 = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "epoch_mmr_bench"
+harness = false

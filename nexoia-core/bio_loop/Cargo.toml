@@ -8,3 +8,10 @@ authors.workspace   = true
 [dependencies]
 crossbeam-channel = { workspace = true }
 sha2              = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "bio_loop_bench"
+harness = false

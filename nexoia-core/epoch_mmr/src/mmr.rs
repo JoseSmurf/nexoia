@@ -336,21 +336,16 @@ impl Mmr {
 
         // Encontramos o peak ao qual este nó pertence
         // e coletamos os irmãos no caminho
-        loop {
-            // Encontra o irmão deste nó no array
-            if let Some(sibling_pos) = self.find_sibling(pos, h) {
-                let sibling_is_right = sibling_pos > pos;
-                siblings.push((self.nodes[sibling_pos].hash, sibling_is_right));
+        while let Some(sibling_pos) = self.find_sibling(pos, h) {
+            let sibling_is_right = sibling_pos > pos;
+            siblings.push((self.nodes[sibling_pos].hash, sibling_is_right));
 
-                // Move para o pai
-                if let Some(parent_pos) = self.find_parent(pos, sibling_pos) {
-                    pos = parent_pos;
-                    h += 1;
-                } else {
-                    break;
-                }
+            // Move para o pai
+            if let Some(parent_pos) = self.find_parent(pos, sibling_pos) {
+                pos = parent_pos;
+                h += 1;
             } else {
-                break; // chegamos a um peak (sem irmão)
+                break;
             }
         }
 
@@ -395,17 +390,42 @@ impl Mmr {
     // ── Utilitários ──────────────────────────────────────────────────────────
 
     /// Encontra a posição no array `nodes` da k-ésima folha (k = leaf_index).
+    ///
+    /// # Fórmula O(1)
+    ///
+    /// Em um MMR append-only, a posição da k-ésima folha no array plano obedece
+    /// a uma progressão determinística baseada no número de bits 1 de k:
+    ///
+    /// ```text
+    /// leaf_pos(k) = 2*k - popcount(k)
+    /// ```
+    ///
+    /// Onde `popcount(k)` é a quantidade de bits 1 na representação binária de k.
+    /// Isto é verdade porque cada "merge" no algoritmo MMR corresponde exatamente
+    /// a um carry na adição binária — e cada carry remove um slot do array que
+    /// seria ocupado por uma folha.
+    ///
+    /// # Verificação independente
+    ///
+    /// Qualquer pessoa pode confirmar esta invariante inspecionando o código de
+    /// `append()`: para cada folha inserida, duas são unidas em um pai, que ocupa
+    /// um slot a menos. O total de slots economizados equivale a `popcount(k)`.
     fn leaf_node_pos(&self, leaf_index: u64) -> Option<usize> {
-        let mut count = 0u64;
-        for (pos, node) in self.nodes.iter().enumerate() {
-            if node.height == 0 {
-                if count == leaf_index {
-                    return Some(pos);
-                }
-                count += 1;
-            }
+        if leaf_index >= self.leaf_count {
+            return None;
         }
-        None
+        let pos = (2 * leaf_index).saturating_sub(leaf_index.count_ones() as u64);
+        debug_assert!(
+            pos < self.nodes.len() as u64,
+            "O(1) leaf_node_pos: pos={pos} fora do array (len={})",
+            self.nodes.len()
+        );
+        debug_assert_eq!(
+            self.nodes[pos as usize].height, 0,
+            "O(1) leaf_node_pos: pos={pos} não é folha (height={})",
+            self.nodes[pos as usize].height
+        );
+        Some(pos as usize)
     }
 
     pub fn node_count(&self) -> usize {

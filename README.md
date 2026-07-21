@@ -17,9 +17,9 @@
 
 ![Build](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square&logo=github-actions)
 ![Rust](https://img.shields.io/badge/rust-stable-orange?style=flat-square&logo=rust)
-![Wasm](https://img.shields.io/badge/target-wasm32--unknown--unknown-blue?style=flat-square&logo=webassembly)
+![Wasm](https://img.shields.io/badge/wasm-epoch__mmr%20|%20zk__prover%20|%20gossip-blue?style=flat-square&logo=webassembly)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)
-![no_std](https://img.shields.io/badge/cortex-no__std-red?style=flat-square)
+![no_std](https://img.shields.io/badge/no__std-epoch__mmr%20|%20zk__prover-orange?style=flat-square)
 ![ZK](https://img.shields.io/badge/proofs-zero--knowledge-purple?style=flat-square)
 ![LGPD](https://img.shields.io/badge/privacy-LGPD--compliant-green?style=flat-square)
 
@@ -54,8 +54,9 @@ Imagine uma teia de aranha perfeita, suspensa no vazio da internet:
 | Peers simultâneos | **256** (array estático, sem HashMap) |
 | Trusted setup ZK | **Nenhum** (stub SHA-256 determinístico) |
 | Tokens / ICO / blockchain externa | **Nenhum** |
-| Target do Córtex | `wasm32-unknown-unknown` (sem WASI, sem libc) |
-| Compatibilidade wasm | **4 GB** de Linear Memory Block |
+| Target wasm (epoch_mmr, zk_prover, gossip) | `wasm32-unknown-unknown` — pure Rust, sem C, sem syscalls |
+| Target nativo (bio_loop) | Host com `std::thread` — WASI futura para `std::sync` |
+| Compatibilidade wasm | **4 GB** Linear Memory Block — sem alocador de host |
 | Conformidade legal | **LGPD Art. 18** — Direito ao Esquecimento implementado em nível criptográfico |
 
 ---
@@ -104,29 +105,43 @@ Verificador nunca vê: o dado original, o caminho de Merkle, qualquer informaç�
 
 ---
 
-## Os 5 Loops Biológicos
+## Os 5 Loops Biológicos — Fluxo Linear
 
 ```
-                          ┌─────────────────┐
-                          │   🕷️  NexoIA    │
-                          │   (A Aranha)    │
-                          └────────┬────────┘
-                                   │
-           ┌───────────────────────┼───────────────────────┐
-           │                       │                       │
-    ┌──────▼──────┐         ┌──────▼──────┐        ┌──────▼──────┐
-    │  Loop 0     │         │  Loop 2     │        │  Loop 4     │
-    │  💓 Coração │         │  🧠 Córtex  │        │  🕸️  Gossip │
-    │  1 000 Hz   │         │  ZK Prover  │        │  Sistema    │
-    │  bio_loop   │         │  zk_prover  │        │  Nervoso    │
-    └──────┬──────┘         └──────┬──────┘        └──────┬──────┘
-           │                       │                       │
-    ┌──────▼──────┐         ┌──────▼──────┐               │
-    │  Loop 1     │         │  Loop 3     │               │
-    │  🫁 Estômago│         │  🧬 Hipoc.  │               │
-    │  Digestão   │─────────│  epoch_mmr  │───────────────┘
-    │  bio_loop   │         │  MMR + LGPD │
-    └─────────────┘         └─────────────┘
+   [Dado Bruto]              🕷️  A Aranha processa em cadeia: 0 → 1 → 3 → 2 → 4
+        │
+        ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Loop 0 — 💓 Coração (bio_loop::heart)                          │
+│  Thread isolada (32KB stack) dispara Event::Heartbeat a 1.000Hz │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │ try_send — lock-free, zero-alloc
+                             ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Loop 1 — 🫁 Estômago (bio_loop::digest)                         │
+│  Digestão com histerese 80%/20%, backpressure, SHA-256 reusado   │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │ SHA-256(data) → [u8; 32]
+                             ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Loop 3 — 🧬 Hipocampo (epoch_mmr)                               │
+│  MMR append-only, LGPD nullify (2 planos), Merkle Proof O(log n)│
+└────────────────────────────┬─────────────────────────────────────┘
+                             │ EpochSeal { epoch, root, leaf_count }
+                             ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Loop 2 — 🧠 Córtex (zk_prover)                                  │
+│  Consolida épocas em ZkProof — stub SHA-256 ou Groth16 futuro   │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │ ZkProof → broadcast
+                             ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Loop 4 — 🕸️  Sistema Nervoso (gossip)                           │
+│  VDF + Trust Window + Transport 1kHz → enxame P2P               │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │ NetworkFrame → peers
+                             ▼
+                        [Rede P2P]
 ```
 
 | Loop | Crate | Analogia Biológica | Função |
@@ -236,35 +251,55 @@ chiavdf           = "1.1"   # VDF Chia (opcional, feature = "chia-vdf")
 
 ## Garantias de Zero-Allocation
 
-O hot path do NexoIA nunca chama o alocador do sistema operacional. Isso não é uma meta — é uma invariante verificável em code review:
+O hot path do NexoIA nunca chama o alocador — `malloc` não existe nos loops 0-1-3-4 durante operação normal. Isso não é uma meta, é uma invariante de arquitetura.
+
+### ✅ Hot Path — Zero Alocação Garantida
 
 ```rust
-// ✅ Zero-allocation: array fixo, cópia por memcpy no canal
-#[repr(C, align(64))]       // uma cache line exata
+// ✅ Evento de 64 bytes — uma cache line exata, copiado por memcpy no canal
+#[repr(C, align(64))]
 pub enum Event {
-    Data([u8; 63]),          // payload fixo, stack-only
+    Data([u8; 63]),          // payload fixo, stack-only, sem heap
     Heartbeat(u64),
     Shutdown,
 }
 
-// ✅ Zero-allocation: hasher reutilizado via finalize_reset()
-let mut hasher = Sha256::new();   // UMA alocação, fora do loop
+// ✅ Hasher reutilizado — UMA alocação fora do loop, reset sem realloc
+let mut hasher = Sha256::new();
 loop {
     hasher.update(payload);
-    let hash = hasher.finalize_reset(); // reset sem realloc
+    let hash = hasher.finalize_reset(); // limpa estado interno, sem desalocar
 }
 
-// ✅ Zero-allocation: ring buffer de tamanho fixo por peer
-behavior_window: [BehaviorSample; 64],  // 64 bytes, stack
+// ✅ Ring buffer de tamanho fixo — stack, 64 bytes exatos por peer
+behavior_window: [BehaviorSample; 64],  // sem Vec, sem Box
+
+// ✅ PeerTable — array estático de 256 slots, sem HashMap, sem realocação
+peers: [Option<PeerState>; 256],        // capacidade fixa em compile-time
+
+// ✅ NetworkFrame — payload de 1024 bytes fixos, sem alocação de rede
+pub struct NetworkFrame {
+    payload: [u8; 1024],                // stack-only, tamanho conhecido
+    len: u16,
+}
 ```
 
+### ⚠️ Alocações Conhecidas e Controladas (fora do hot path)
+
+Estes locais alocam heap **intencionalmente** — nenhum deles executa no caminho crítico de 1kHz:
+
+| Local | O quê | Por que é seguro |
+|-------|-------|-----------------|
+| `Ingestor::drain_burst()` | `Vec<NetworkFrame>` | Chamado **apenas** na inicialização ou após silêncio prolongado. O hot path usa `drain_one_tick()` que é zero-alloc. |
+| `ZkWitness::merkle_path` | `Vec<([u8;32], bool)>` | Construído fora do ZK prover, **dropado e zerado** (`#[derive(Drop)]` limpa os bytes) imediatamente após `prove_inclusion()`. |
+| `EpochSeal` / `ConsolidationResult` | `struct` em `Vec<sealed_epochs>` | Alocado uma vez por época (~segundos ou minutos), não por tick. |
+
 ```rust
-// ❌ O que NÃO existe no hot path:
-Vec::new()          // alocação heap
-Box::new()          // heap
-String::from()      // heap
-HashMap::new()      // heap + rehashing
-tokio::spawn()      // overhead de task scheduling no crítico
+// ❌ NADA disso existe em nenhum loop — nem dentro, nem fora:
+Box::new()           // heap não gerenciado
+String::from()       // alocação de string
+tokio::spawn()       // runtime assíncrono (thread OS pura)
+unsafe { ... }       // zero unsafe no nexoia-core
 ```
 
 ---

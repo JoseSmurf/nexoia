@@ -1,4 +1,5 @@
 /target
+nexoia-core/target/
 /state.json
 /evidence.jsonl
 /decisions.jsonl
@@ -21,3 +22,5 @@ test_output.txt
 # Knowledge bootstrapping
 *.jsonl
 knowledge.json
+
+nexo_wal.log

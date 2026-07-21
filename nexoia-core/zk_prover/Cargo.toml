@@ -1,0 +1,15 @@
+[package]
+name        = "zk_prover"
+description = "Motor de Consolidação ZK — agrega e prova o estado das épocas sem revelar dados"
+version.workspace   = true
+edition.workspace   = true
+authors.workspace   = true
+
+[dependencies]
+sha2      = { workspace = true }
+epoch_mmr = { path = "../epoch_mmr" }
+
+[features]
+default = []
+# Ativa o backend de prova real (pesado). Em dev, usamos stubs.
+real-proof = []

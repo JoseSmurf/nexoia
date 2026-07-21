@@ -1,0 +1,10 @@
+[package]
+name        = "bio_loop"
+description = "Coração e Estômago — os dois loops biológicos de ritmo e digestão de dados"
+version.workspace   = true
+edition.workspace   = true
+authors.workspace   = true
+
+[dependencies]
+crossbeam-channel = { workspace = true }
+sha2              = { workspace = true }

@@ -1,0 +1,19 @@
+[package]
+name        = "gossip"
+description = "Teia P2P com VDF — protocolo de fofoca Sybil-resistente baseado em Verifiable Delay Function"
+version.workspace   = true
+edition.workspace   = true
+authors.workspace   = true
+
+[dependencies]
+crossbeam-channel = { workspace = true }
+sha2              = { workspace = true }
+# chiavdf é opcional — usa VDF puro em Rust por padrão (wasm-compatível)
+# Ative com --features chia-vdf para ambientes nativos com C toolchain
+chiavdf           = { workspace = true, optional = true }
+
+
+[features]
+default  = []
+# Backend VDF nativo (Chia VDF via C) — NÃO compatível com wasm
+chia-vdf = ["chiavdf"]

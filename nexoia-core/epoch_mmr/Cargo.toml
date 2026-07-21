@@ -1,0 +1,9 @@
+[package]
+name        = "epoch_mmr"
+description = "DAG de Proveniência — Merkle Mountain Range por época com raízes criptográficas"
+version.workspace   = true
+edition.workspace   = true
+authors.workspace   = true
+
+[dependencies]
+sha2 = { workspace = true }

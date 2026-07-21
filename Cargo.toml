@@ -1,18 +1,55 @@
+# ─── ADR-001: Workspace Unificado ──────────────────────────────────────────────
+# O workspace raiz contém TODO o grafo de dependências do NexoIA.
+# Não há workspaces aninhados — todos os crates compartilham o mesmo
+# resolutor, lockfile e perfis de compilação.
+#
+# Mapa de membros:
+#   crates/host          — Titânio: runtime nativo (wasmtime, P2P Iroh, Axum API)
+#   crates/wasm_cortex   — Córtex: no_std wasm32 (legado, motor de dissonância)
+#   nexoia-core/bio_loop — Loop 0+1: Coração 1kHz + Digestão com histerese
+#   nexoia-core/epoch_mmr— Loop 3: Hipocampo, MMR append-only, LGPD dual-plane
+#   nexoia-core/zk_prover— Loop 2: Córtex ZK, consolida EpochSeal → ZkProof
+#   nexoia-core/gossip   — Loop 4: P2P Sybil-resistente, VDF + Trust Window
+#
+# Contrato de integração (Fase 3):
+#   bio_loop::digest  → substituir evidence_hash no pipeline
+#   epoch_mmr::mmr    → append(hash) + seal_epoch() → ZkProver
+#   zk_prover         → consolidate(seal) → prove_inclusion()
+#   gossip            → broadcast(proof) + ingest(NetworkFrame)
+# ────────────────────────────────────────────────────────────────────────────────
+
 [workspace]
 members = [
     "crates/host",
-    "crates/wasm_cortex"
+    "crates/wasm_cortex",
+    "nexoia-core/bio_loop",
+    "nexoia-core/epoch_mmr",
+    "nexoia-core/zk_prover",
+    "nexoia-core/gossip",
 ]
 resolver = "2"
 
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["NexoIA Engineering"]
+license = "MIT"
+
+[workspace.dependencies]
+crossbeam-channel = "0.5"
+sha2              = "0.10"
+chiavdf           = "1.1"
+
 [profile.release]
-opt-level = 3
-lto = "fat"
+opt-level     = 3
+lto           = "fat"
 codegen-units = 1
-panic = "abort" # O Titânio nunca recua
+strip         = "symbols"
+panic         = "abort"
 
 [profile.dev]
-panic = "abort"
+opt-level = 1
+panic     = "abort"
 
 [profile.test]
 panic = "abort"

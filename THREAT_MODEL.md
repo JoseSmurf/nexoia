@@ -78,3 +78,99 @@ Resultado dos testes adversariais da Fase 2. Testes que falharam expõem fraquez
 3. **Ban é sticky por 24h** — decisão de design intencional, documentada
 4. **Testes de rede sob estresse** — não testamos throughput real (apenas unitário)
 5. **Replay de mensagens** — IDs únicos previnem EPA replay, mas nonce de handshake não está sendo testado
+
+---
+
+## Apêndice A: Defesa Sybil no nexoia-core (VDF + Trust Window)
+
+### Arquitetura de Defesa (3 Camadas)
+
+```
+Layer 1 — VDF Guard (custo computacional)
+Layer 2 — Trust Window (comportamento temporal)
+Layer 3 — Bio-loop Alignment (cadência de ingestão)
+```
+
+### Layer 1: VDF Guard — Matemática do Custo
+
+Cada novo peer paga um proof-of-sequential-work antes de ser admitido:
+
+```
+C_identidade = DEFAULT_DIFFICULTY × T_sha256
+
+Onde:
+  DEFAULT_DIFFICULTY = 400.000 (iterações SHA-256)
+  T_sha256 ≈ 0,5–3 μs (pure Rust sha2)
+```
+
+**Custo por identidade no hardware-alvo:**
+
+| Hardware | T_sha256 | C_identidade | 10.000 identidades (1 core) |
+|----------|----------|--------------|----------------------------|
+| Pure Rust (ARM M1) | ~2 μs | ~800 ms | ~2,2 h |
+| Pure Rust (x86 Zen4) | ~0,8 μs | ~320 ms | ~53 min |
+| SHA-NI (x86) | ~0,05 μs | ~20 ms | ~3,3 min |
+
+**Limitação fundamental:** O VDF é sequencial DENTRO de uma prova, mas paralelizável ENTRE provas. Atacante com N cores:
+
+```
+T_vdf(N) = (10.000 / N) × C_identidade
+
+Exemplo SHA-NI + 128 cores (cloud ~$2/h):
+T_vdf(128) = (10.000 / 128) × 20 ms ≈ 1,56 s
+```
+
+**O VDF sozinho NÃO segura um atacante paralelizado.** A Sybil resistance real está na Layer 2.
+
+### Layer 2: Trust Window — O Gargalo Real
+
+Após pagar o VDF, o peer entra em `Handshaking` com `trust_score = 0`. Para chegar a `Active` com `score ≥ 60`:
+
+```
+T_promocao = TRUST_THRESHOLD_HIGH / frame_rate_max
+           = 38 amostras boas / 1.000 fps
+           = 38 ms (mínimo teórico)
+```
+
+**Para 10.000 identidades Sybil ativas simultaneamente:**
+
+```
+T_trust_window = 10.000 × 38 ms = 380 s ≈ 6,3 min
+```
+
+O atendimento é serializado pelo bio_loop a 1 frame/tick — não adianta paralelizar.
+
+### Custo Total do Ataque
+
+| Cenário | VDF sozinho | VDF + Trust Window | Gargalo |
+|---------|-------------|-------------------|---------|
+| 1 core, Pure Rust | ~2,2 h | ~2,3 h | VDF |
+| 128 cores, SHA-NI | ~1,6 s | ~6,3 min | Trust Window (99,6%) |
+| 1.000 cores, SHA-NI | ~0,2 s | ~6,3 min | Trust Window (99,99%) |
+
+**A Trust Window domina o custo total para qualquer atacante com ≥ ~40 cores.**
+
+### Layer 3: Bio-loop Alignment
+
+```
+throughput_máx = 1.000 fps (1 frame/tick)
+L_max_fila     = INGESTION_QUEUE_DEPTH / 1.000 Hz = 512 ms
+```
+
+Teto físico de ingestão — sem surpresas de latência sob carga.
+
+### Cenários de Ataque
+
+| Ataque | Efetividade | Mitigação |
+|--------|-------------|-----------|
+| Sybil 10k identidades | Proibitivo | Trust Window ~6 min + VDF + 256 slot limit |
+| Rotação rápida de peers | Caro | VDF 400k (~20-800ms) + score neutro ao reconectar |
+| Flood L7 | Limitado | Fila 512 + histerese 80%/20% + backpressure |
+| Peer silencioso | Mitigado | Decaimento: -1 ponto/segundo de inatividade |
+| Pré-computação VDF | Prevenido | Seed = SHA256(ip \|\| timestamp \|\| nonce) — único por conexão |
+
+### Limitações
+
+1. **Pure Rust SHA-256 é 40× mais lento que SHA-NI** — Assimetrio grande entre hardware. Nós ARM sem SHA-NI pagam ~800 ms/prova. Aceitável para nós de borda com poucas conexões.
+2. **Trust Window vulnerável a ataques lentos** — 1 identidade/hora bem-comportada passa sem ser detectada. Mitigação off-chain: monitoramento de padrões de conexão.
+3. **Sem reputação cruzada entre peers** — Cada nó constrói sua própria janela. Impede conluio, mas não aprende com a rede. Feature futura: troca de amostras agregadas via gossip.

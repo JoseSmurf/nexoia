@@ -625,7 +625,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         // Spawn
-        let sup = Supervisor::spawn(dir.path());
+        let (sup, _proof_rx) = Supervisor::spawn(dir.path());
 
         // Deve estar rodando após spawn
         assert!(!sup.is_sovereign()); // confidence must be 0 at genesis
@@ -662,7 +662,7 @@ mod tests {
     #[test]
     fn seal_epoch_returns_seal() {
         let dir = tempfile::tempdir().unwrap();
-        let sup = Supervisor::spawn(dir.path());
+        let (sup, _proof_rx) = Supervisor::spawn(dir.path());
 
         // MMR vazio → seal retorna None
         assert!(sup.seal_epoch().is_none());
@@ -686,7 +686,7 @@ mod tests {
     #[test]
     fn confidence_increases_with_data() {
         let dir = tempfile::tempdir().unwrap();
-        let sup = Supervisor::spawn(dir.path());
+        let (sup, _proof_rx) = Supervisor::spawn(dir.path());
 
         let c0 = sup.compute_confidence();
 
@@ -715,7 +715,7 @@ mod tests {
     fn supervisor_drop_joins_threads() {
         let dir = tempfile::tempdir().unwrap();
 
-        let sup = Supervisor::spawn(dir.path());
+        let (sup, _proof_rx) = Supervisor::spawn(dir.path());
         for i in 0..50 {
             let _ = sup.feed_data([i as u8; 63]);
             let _ = sup.feed_heartbeat(i);

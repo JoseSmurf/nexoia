@@ -154,10 +154,7 @@ impl WalStore {
     /// Se o WAL estiver vazio (só header), o contador começa em 1.
     pub fn open(path: &Path) -> io::Result<Self> {
         if path.exists() {
-            let mut file = OpenOptions::new()
-                .read(true)
-                .append(true)
-                .open(path)?;
+            let mut file = OpenOptions::new().read(true).append(true).open(path)?;
 
             let len = file.metadata()?.len();
 
@@ -311,7 +308,8 @@ impl WalStore {
         if let Some(last_chunk) = data.chunks_exact(RECORD_SIZE).next_back() {
             let buf: &[u8; RECORD_SIZE] = last_chunk.try_into().unwrap();
             if let Some(record) = WalRecord::decode(buf) {
-                self.monotonic.store(record.timestamp + 1, Ordering::Relaxed);
+                self.monotonic
+                    .store(record.timestamp + 1, Ordering::Relaxed);
             }
         }
 

@@ -462,7 +462,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ctx.spawn_tasks(&checkpoint_rules);
 
     // ── Provenance Bridge: Digestor + MMR em background ──
-    let provenance = ProvenanceBridge::spawn();
+    let provenance = ProvenanceBridge::spawn(&cfg.data_dir);
     println!(
         "Provenance:   bio-loop + epoch-mmr bridge active (membrane cap: {})",
         bio_loop::digest::MEMBRANE_CAPACITY

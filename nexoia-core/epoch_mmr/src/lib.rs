@@ -20,6 +20,7 @@
 /// ```
 pub mod mmr;
 pub mod provenance;
+pub mod wal;
 
 pub use mmr::{EpochSeal, LeafInfo, MerkleProof, Mmr, MmrError};
 pub use provenance::{LeafProvenance, LeafSource, ProvenanceRegistry};

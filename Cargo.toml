@@ -4,12 +4,13 @@
 # resolutor, lockfile e perfis de compilação.
 #
 # Mapa de membros:
-#   crates/host          — Titânio: runtime nativo (wasmtime, P2P Iroh, Axum API)
-#   crates/wasm_cortex   — Córtex: no_std wasm32 (legado, motor de dissonância)
-#   nexoia-core/bio_loop — Loop 0+1: Coração 1kHz + Digestão com histerese
-#   nexoia-core/epoch_mmr— Loop 3: Hipocampo, MMR append-only, LGPD dual-plane
-#   nexoia-core/zk_prover— Loop 2: Córtex ZK, consolida EpochSeal → ZkProof
-#   nexoia-core/gossip   — Loop 4: P2P Sybil-resistente, VDF + Trust Window
+#   crates/host              — Titânio: runtime nativo (wasmtime, P2P Iroh, Axum API)
+#   crates/wasm_cortex       — Córtex: no_std wasm32 (legado, motor de dissonância)
+#   nexoia-core/bio_loop     — Loop 0+1: Coração 1kHz + Digestão com histerese
+#   nexoia-core/epoch_mmr    — Loop 3: Hipocampo, MMR append-only, LGPD dual-plane
+#   nexoia-core/zk_prover    — Loop 2: Córtex ZK, consolida EpochSeal → ZkProof
+#   nexoia-core/gossip       — Loop 4: P2P Sybil-resistente, VDF + Trust Window
+#   nexoia-core/supervisor   — Gênese: Constituição + bio_loop + consolidação
 #
 # Contrato de integração (Fase 3):
 #   bio_loop::digest  → substituir evidence_hash no pipeline
@@ -26,6 +27,7 @@ members = [
     "nexoia-core/epoch_mmr",
     "nexoia-core/zk_prover",
     "nexoia-core/gossip",
+    "nexoia-core/supervisor",
 ]
 resolver = "2"
 

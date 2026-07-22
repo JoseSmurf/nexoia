@@ -56,6 +56,7 @@ zstd = "0.13"
 # NexoIA core crates (workspace path deps)
 bio_loop          = { path = "../../nexoia-core/bio_loop" }
 epoch_mmr         = { path = "../../nexoia-core/epoch_mmr" }
+supervisor        = { path = "../../nexoia-core/supervisor" }
 crossbeam-channel = { workspace = true }
 
 [dev-dependencies]

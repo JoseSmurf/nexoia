@@ -1444,6 +1444,7 @@ version = "0.2.0"
 dependencies = [
  "criterion",
  "sha2 0.10.9",
+ "tempfile",
 ]
 
 [[package]]
@@ -5324,6 +5325,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
+name = "supervisor"
+version = "0.2.0"
+dependencies = [
+ "bio_loop",
+ "crossbeam-channel",
+ "epoch_mmr",
+ "sha2 0.10.9",
+ "tempfile",
+]
+
+[[package]]
 name = "syn"
 version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5579,6 +5591,7 @@ dependencies = [
  "sha2 0.10.9",
  "smallvec",
  "static_assertions",
+ "supervisor",
  "tempfile",
  "tokio",
  "tokio-rustls",

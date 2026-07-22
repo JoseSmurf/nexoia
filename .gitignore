@@ -15,6 +15,14 @@ AUDITORIA_*.md
 /data/awakening/
 /data/knowledge/*.json
 /data/knowledge/*.jsonl
+/data/checkpoints/
+/data/identity.json
+/data/network.json
+/data/reputation.json
+/data/state.json
+/data/manifest.json
+/data/supervisor.wal
+/crates/host/data/
 test_output.txt
 .mimocode/
 .cron-lock

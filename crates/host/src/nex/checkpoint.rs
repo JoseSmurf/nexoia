@@ -41,7 +41,9 @@ impl From<&ReactiveRule> for ReactiveRuleSnapshot {
                     }
                     Trigger::PeerConnected => ("peer_connected".to_string(), String::new()),
                     Trigger::PeerDisconnected => ("peer_disconnected".to_string(), String::new()),
-                    Trigger::HandshakeCompleted => ("handshake_completed".to_string(), String::new()),
+                    Trigger::HandshakeCompleted => {
+                        ("handshake_completed".to_string(), String::new())
+                    }
                     Trigger::HandshakeFailed => ("handshake_failed".to_string(), String::new()),
                     Trigger::SessionCreated => ("session_created".to_string(), String::new()),
                     Trigger::SessionRemoved => ("session_removed".to_string(), String::new()),
@@ -55,13 +57,17 @@ impl From<&ReactiveRule> for ReactiveRuleSnapshot {
                     actions: actions_vec,
                 }
             }
-            ReactiveRule::Block { event, threshold, window_secs, target, body: _ } => {
-                ReactiveRuleSnapshot {
-                    trigger_type: "block".to_string(),
-                    trigger_params: format!("{:?}_{}_{}", event, threshold, window_secs),
-                    actions: vec![target.clone()],
-                }
-            }
+            ReactiveRule::Block {
+                event,
+                threshold,
+                window_secs,
+                target,
+                body: _,
+            } => ReactiveRuleSnapshot {
+                trigger_type: "block".to_string(),
+                trigger_params: format!("{:?}_{}_{}", event, threshold, window_secs),
+                actions: vec![target.clone()],
+            },
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿pub mod api;
+pub mod api;
 pub mod crypto;
 pub mod crypto_key;
 pub mod epa;
@@ -7,11 +7,10 @@ pub mod handshake_runner;
 pub mod heartbeat;
 pub mod identity;
 pub mod listener;
+pub mod membrane;
 pub mod persistence;
 pub mod reputation;
 pub mod secure_transport;
 pub mod session;
 pub mod transport;
 pub mod verify;
-pub mod membrane;
-

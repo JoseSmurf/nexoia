@@ -60,9 +60,17 @@ pub enum NetworkEvent {
 pub enum ExecutableAction {
     Log(String),
     Emit(String),
-    MarkInactive { peer: String },
-    AdjustReputation { peer: String, delta: i32 },
-    RunNexBlock { target: String, body: Vec<crate::nex::ast::Stmt> },
+    MarkInactive {
+        peer: String,
+    },
+    AdjustReputation {
+        peer: String,
+        delta: i32,
+    },
+    RunNexBlock {
+        target: String,
+        body: Vec<crate::nex::ast::Stmt>,
+    },
 }
 
 /// Regra reativa parseada de um programa NEX.
@@ -181,7 +189,14 @@ impl ReactiveEngine {
                 if self.add_rule(rule).is_ok() {
                     count += 1;
                 }
-            } else if let crate::nex::ast::Stmt::ReactiveBlock { event, threshold, window_secs, target, body } = stmt {
+            } else if let crate::nex::ast::Stmt::ReactiveBlock {
+                event,
+                threshold,
+                window_secs,
+                target,
+                body,
+            } = stmt
+            {
                 let rule = ReactiveRule::Block {
                     event: event.clone(),
                     threshold: *threshold,
@@ -215,7 +230,10 @@ impl ReactiveEngine {
 
         for rule in &self.rules {
             match rule {
-                ReactiveRule::Legacy { trigger, actions: rule_actions } => {
+                ReactiveRule::Legacy {
+                    trigger,
+                    actions: rule_actions,
+                } => {
                     if self.matches_trigger(trigger, event) {
                         matched = true;
                         for action in rule_actions {
@@ -225,7 +243,13 @@ impl ReactiveEngine {
                         }
                     }
                 }
-                ReactiveRule::Block { event: rule_event, threshold: _threshold, window_secs: _window_secs, target: _target, body } => {
+                ReactiveRule::Block {
+                    event: rule_event,
+                    threshold: _threshold,
+                    window_secs: _window_secs,
+                    target: _target,
+                    body,
+                } => {
                     if let Some(peer_id) = self.matches_event(rule_event, event) {
                         // O threshold temporal (window) idealmente é checado consultando o PeerState.
                         // Como a avaliação é reativa, emitimos a ação RunNexBlock.
@@ -244,11 +268,21 @@ impl ReactiveEngine {
         EvaluationResult { matched, actions }
     }
 
-    fn matches_event(&self, rule_event: &crate::nex::ast::EventType, event: &NetworkEvent) -> Option<String> {
+    fn matches_event(
+        &self,
+        rule_event: &crate::nex::ast::EventType,
+        event: &NetworkEvent,
+    ) -> Option<String> {
         match (rule_event, event) {
-            (crate::nex::ast::EventType::ZkProofInvalid, NetworkEvent::ZkProofInvalid { peer_id }) => Some(peer_id.clone()),
+            (
+                crate::nex::ast::EventType::ZkProofInvalid,
+                NetworkEvent::ZkProofInvalid { peer_id },
+            ) => Some(peer_id.clone()),
             (crate::nex::ast::EventType::HeartbeatMiss, NetworkEvent::HeartbeatMiss { .. }) => None, // Lógica baseada em peer necessária
-            (crate::nex::ast::EventType::MalformedPacket, NetworkEvent::MalformedPacket { peer_id }) => Some(peer_id.clone()),
+            (
+                crate::nex::ast::EventType::MalformedPacket,
+                NetworkEvent::MalformedPacket { peer_id },
+            ) => Some(peer_id.clone()),
             _ => None,
         }
     }

@@ -137,14 +137,18 @@ pub fn parse(source: &str) -> Result<Program, ParseError> {
         if tokens.is_empty() {
             continue;
         }
-        
+
         if current_block_tokens.is_empty() {
             statement_line_no = line_no;
         }
 
         for token in &tokens {
-            if token.kind == TokenKind::LBrace { brace_depth += 1; }
-            if token.kind == TokenKind::RBrace { brace_depth -= 1; }
+            if token.kind == TokenKind::LBrace {
+                brace_depth += 1;
+            }
+            if token.kind == TokenKind::RBrace {
+                brace_depth -= 1;
+            }
         }
 
         current_block_tokens.extend(tokens);
@@ -1039,92 +1043,180 @@ fn parse_reactive_action(
 fn parse_reactive_block(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError> {
     // on event ZkProofInvalid(threshold: 5, window: 60s) for peer_id { ... }
     use crate::network::transport::MAX_REACTIVE_THRESHOLD;
-    
+
     // token 0: "on"
     // token 1: "event"
-    let event_token = tokens.get(2).ok_or_else(|| ParseError::new(line_no, 1, "expected EventType after 'event'"))?;
+    let event_token = tokens
+        .get(2)
+        .ok_or_else(|| ParseError::new(line_no, 1, "expected EventType after 'event'"))?;
     let event_word = word(event_token, line_no)?;
-    
+
     let event = match event_word.as_str() {
         "ZkProofInvalid" => crate::nex::ast::EventType::ZkProofInvalid,
         "HeartbeatMiss" => crate::nex::ast::EventType::HeartbeatMiss,
         "MalformedPacket" => crate::nex::ast::EventType::MalformedPacket,
-        _ => return Err(ParseError::new(line_no, event_token.column, format!("unknown event type '{event_word}'"))),
+        _ => {
+            return Err(ParseError::new(
+                line_no,
+                event_token.column,
+                format!("unknown event type '{event_word}'"),
+            ))
+        }
     };
-    
+
     // (
     let mut idx = 3;
-    let lparen = tokens.get(idx).ok_or_else(|| ParseError::new(line_no, 1, "expected '(' after EventType"))?;
-    if !matches!(lparen.kind, TokenKind::LParen) { return Err(ParseError::new(line_no, lparen.column, "expected '(' after EventType")); }
-    idx += 1;
-    
-    // threshold
-    let kw_threshold = expect_word(tokens, idx, line_no, "expected 'threshold'")?;
-    if kw_threshold != "threshold" { return Err(ParseError::new(line_no, tokens[idx].column, "expected 'threshold'")); }
-    idx += 1;
-    expect_eq(tokens, idx, line_no, "expected ':' after threshold").or_else(|_| {
-        if matches!(tokens.get(idx).map(|t| &t.kind), Some(TokenKind::Colon)) { Ok(()) } else { Err(ParseError::new(line_no, tokens[idx].column, "expected ':' after threshold")) }
-    })?;
-    idx += 1;
-    
-    let threshold_token = tokens.get(idx).ok_or_else(|| ParseError::new(line_no, 1, "expected threshold value"))?;
-    let threshold = match &threshold_token.kind {
-        TokenKind::Int(v) => *v as u32,
-        _ => return Err(ParseError::new(line_no, threshold_token.column, "expected integer for threshold")),
-    };
-    if threshold as usize > MAX_REACTIVE_THRESHOLD {
-        return Err(ParseError::new(line_no, threshold_token.column, format!("threshold {threshold} exceeds hard limit {MAX_REACTIVE_THRESHOLD}")));
+    let lparen = tokens
+        .get(idx)
+        .ok_or_else(|| ParseError::new(line_no, 1, "expected '(' after EventType"))?;
+    if !matches!(lparen.kind, TokenKind::LParen) {
+        return Err(ParseError::new(
+            line_no,
+            lparen.column,
+            "expected '(' after EventType",
+        ));
     }
     idx += 1;
-    
-    // ,
-    let comma = tokens.get(idx).ok_or_else(|| ParseError::new(line_no, 1, "expected ','"))?;
-    if !matches!(comma.kind, TokenKind::Comma) { return Err(ParseError::new(line_no, comma.column, "expected ','")); }
+
+    // threshold
+    let kw_threshold = expect_word(tokens, idx, line_no, "expected 'threshold'")?;
+    if kw_threshold != "threshold" {
+        return Err(ParseError::new(
+            line_no,
+            tokens[idx].column,
+            "expected 'threshold'",
+        ));
+    }
     idx += 1;
-    
-    // window
-    let kw_window = expect_word(tokens, idx, line_no, "expected 'window'")?;
-    if kw_window != "window" { return Err(ParseError::new(line_no, tokens[idx].column, "expected 'window'")); }
-    idx += 1;
-    expect_eq(tokens, idx, line_no, "expected ':' after window").or_else(|_| {
-        if matches!(tokens.get(idx).map(|t| &t.kind), Some(TokenKind::Colon)) { Ok(()) } else { Err(ParseError::new(line_no, tokens[idx].column, "expected ':' after window")) }
+    expect_eq(tokens, idx, line_no, "expected ':' after threshold").or_else(|_| {
+        if matches!(tokens.get(idx).map(|t| &t.kind), Some(TokenKind::Colon)) {
+            Ok(())
+        } else {
+            Err(ParseError::new(
+                line_no,
+                tokens[idx].column,
+                "expected ':' after threshold",
+            ))
+        }
     })?;
     idx += 1;
-    
-    let window_token = tokens.get(idx).ok_or_else(|| ParseError::new(line_no, 1, "expected window value"))?;
+
+    let threshold_token = tokens
+        .get(idx)
+        .ok_or_else(|| ParseError::new(line_no, 1, "expected threshold value"))?;
+    let threshold = match &threshold_token.kind {
+        TokenKind::Int(v) => *v as u32,
+        _ => {
+            return Err(ParseError::new(
+                line_no,
+                threshold_token.column,
+                "expected integer for threshold",
+            ))
+        }
+    };
+    if threshold as usize > MAX_REACTIVE_THRESHOLD {
+        return Err(ParseError::new(
+            line_no,
+            threshold_token.column,
+            format!("threshold {threshold} exceeds hard limit {MAX_REACTIVE_THRESHOLD}"),
+        ));
+    }
+    idx += 1;
+
+    // ,
+    let comma = tokens
+        .get(idx)
+        .ok_or_else(|| ParseError::new(line_no, 1, "expected ','"))?;
+    if !matches!(comma.kind, TokenKind::Comma) {
+        return Err(ParseError::new(line_no, comma.column, "expected ','"));
+    }
+    idx += 1;
+
+    // window
+    let kw_window = expect_word(tokens, idx, line_no, "expected 'window'")?;
+    if kw_window != "window" {
+        return Err(ParseError::new(
+            line_no,
+            tokens[idx].column,
+            "expected 'window'",
+        ));
+    }
+    idx += 1;
+    expect_eq(tokens, idx, line_no, "expected ':' after window").or_else(|_| {
+        if matches!(tokens.get(idx).map(|t| &t.kind), Some(TokenKind::Colon)) {
+            Ok(())
+        } else {
+            Err(ParseError::new(
+                line_no,
+                tokens[idx].column,
+                "expected ':' after window",
+            ))
+        }
+    })?;
+    idx += 1;
+
+    let window_token = tokens
+        .get(idx)
+        .ok_or_else(|| ParseError::new(line_no, 1, "expected window value"))?;
     let window_secs = match &window_token.kind {
         TokenKind::Int(v) => *v as u64,
-        _ => return Err(ParseError::new(line_no, window_token.column, "expected integer for window")),
+        _ => {
+            return Err(ParseError::new(
+                line_no,
+                window_token.column,
+                "expected integer for window",
+            ))
+        }
     };
     idx += 1;
-    
+
     let s_token = expect_word(tokens, idx, line_no, "expected 's' after window integer")?;
-    if s_token != "s" { return Err(ParseError::new(line_no, tokens[idx].column, "expected 's' after window integer")); }
+    if s_token != "s" {
+        return Err(ParseError::new(
+            line_no,
+            tokens[idx].column,
+            "expected 's' after window integer",
+        ));
+    }
     idx += 1;
-    
+
     // )
-    let rparen = tokens.get(idx).ok_or_else(|| ParseError::new(line_no, 1, "expected ')'"))?;
-    if !matches!(rparen.kind, TokenKind::RParen) { return Err(ParseError::new(line_no, rparen.column, "expected ')'")); }
+    let rparen = tokens
+        .get(idx)
+        .ok_or_else(|| ParseError::new(line_no, 1, "expected ')'"))?;
+    if !matches!(rparen.kind, TokenKind::RParen) {
+        return Err(ParseError::new(line_no, rparen.column, "expected ')'"));
+    }
     idx += 1;
-    
+
     // for
     let kw_for = expect_word(tokens, idx, line_no, "expected 'for'")?;
-    if kw_for != "for" { return Err(ParseError::new(line_no, tokens[idx].column, "expected 'for'")); }
+    if kw_for != "for" {
+        return Err(ParseError::new(
+            line_no,
+            tokens[idx].column,
+            "expected 'for'",
+        ));
+    }
     idx += 1;
-    
+
     // target
     let target = expect_word(tokens, idx, line_no, "expected target identifier")?;
     idx += 1;
-    
+
     // {
-    let lbrace = tokens.get(idx).ok_or_else(|| ParseError::new(line_no, 1, "expected '{'"))?;
-    if !matches!(lbrace.kind, TokenKind::LBrace) { return Err(ParseError::new(line_no, lbrace.column, "expected '{'")); }
+    let lbrace = tokens
+        .get(idx)
+        .ok_or_else(|| ParseError::new(line_no, 1, "expected '{'"))?;
+    if !matches!(lbrace.kind, TokenKind::LBrace) {
+        return Err(ParseError::new(line_no, lbrace.column, "expected '{'"));
+    }
     idx += 1;
-    
+
     // body statements until '}'
     let mut body = Vec::new();
     let mut current_stmt = Vec::new();
-    
+
     while idx < tokens.len() {
         let t = &tokens[idx];
         if matches!(t.kind, TokenKind::RBrace) {
@@ -1142,7 +1234,7 @@ fn parse_reactive_block(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseE
         }
         idx += 1;
     }
-    
+
     Ok(Stmt::ReactiveBlock {
         event,
         threshold,
@@ -1436,5 +1528,3 @@ mod tests {
         assert!(err.to_string().contains("expected 'requires' after action"));
     }
 }
-
-

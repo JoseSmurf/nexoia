@@ -96,8 +96,11 @@ impl ActionExecutor {
                     if let Some(addr) = peer_addrs.get(target) {
                         if let Some(mem) = &membrane {
                             mem.ban_ip(&addr.ip());
-                            report.logs.push(format!("Membrane Enforced: {} banned at socket level", addr.ip()));
-                            
+                            report.logs.push(format!(
+                                "Membrane Enforced: {} banned at socket level",
+                                addr.ip()
+                            ));
+
                             // TODO(Phase 8 - Epidemic Network):
                             // report.emissions.push(format!("EpidemicAlert: {}", addr.ip()));
                             // O nó deverá montar um NetworkFrame::EpidemicAlert(addr.ip(), ZkProofHash)
@@ -126,8 +129,13 @@ mod tests {
         let mut reputation = ReputationStore::new();
         let peer_addrs = HashMap::new();
 
-        let report =
-            ActionExecutor::execute(&actions, &mut peer_states, &mut reputation, &peer_addrs, None);
+        let report = ActionExecutor::execute(
+            &actions,
+            &mut peer_states,
+            &mut reputation,
+            &peer_addrs,
+            None,
+        );
 
         assert_eq!(report.logs.len(), 1);
         assert_eq!(report.logs[0], "Test message");
@@ -146,8 +154,13 @@ mod tests {
             peer: "node_a".to_string(),
         }];
 
-        let report =
-            ActionExecutor::execute(&actions, &mut peer_states, &mut reputation, &peer_addrs, None);
+        let report = ActionExecutor::execute(
+            &actions,
+            &mut peer_states,
+            &mut reputation,
+            &peer_addrs,
+            None,
+        );
 
         assert_eq!(report.peer_changes.len(), 1);
         assert!(peer_states.get(&addr).unwrap().consecutive_misses > 0);
@@ -164,8 +177,13 @@ mod tests {
             delta: -10,
         }];
 
-        let report =
-            ActionExecutor::execute(&actions, &mut peer_states, &mut reputation, &peer_addrs, None);
+        let report = ActionExecutor::execute(
+            &actions,
+            &mut peer_states,
+            &mut reputation,
+            &peer_addrs,
+            None,
+        );
 
         assert_eq!(report.reputation_changes.len(), 1);
         assert!(reputation.is_banned("node_b"));
@@ -211,4 +229,3 @@ mod tests {
         assert!(peer_states.get(&addr).unwrap().consecutive_misses > 0);
     }
 }
-

@@ -1,5 +1,5 @@
 //! membrane.rs — A Garra Física (Membrane Enforcement)
-//! 
+//!
 //! Uma parede lock-free no nível de socket que atua interceptando pacotes em O(1)
 //! antes de qualquer alocação ou desserialização.
 //! Otimizada para L1 cache e sem garbage collection (Zero-Allocation).
@@ -11,7 +11,7 @@ const BLOOM_FILTER_WORDS: usize = 512;
 const BLOOM_FILTER_BITS: usize = BLOOM_FILTER_WORDS * 64; // 32768 bits (4KB)
 
 /// Otimização agressiva L1 Cache: Alinhamento de struct em 64-bytes (tamanho exato da cache line em x86_64).
-/// Em ataques DDoS, o iterador de um array mata a CPU. O Bloom Filter Atômico não itera. Ele apenas 
+/// Em ataques DDoS, o iterador de um array mata a CPU. O Bloom Filter Atômico não itera. Ele apenas
 /// lê ponteiros estáticos diretamente da cache L1 da CPU em complexidade de tempo puramente $O(1)$.
 #[repr(C)]
 #[repr(align(64))]
@@ -46,12 +46,12 @@ impl LockFreeBlacklist {
         };
         let hash = hasher.finalize();
         let bytes = hash.as_bytes();
-        
+
         // Extrai 3 blocos pseudo-aleatórios de 16 bits
         let h1 = u16::from_le_bytes([bytes[0], bytes[1]]) as usize % BLOOM_FILTER_BITS;
         let h2 = u16::from_le_bytes([bytes[2], bytes[3]]) as usize % BLOOM_FILTER_BITS;
         let h3 = u16::from_le_bytes([bytes[4], bytes[5]]) as usize % BLOOM_FILTER_BITS;
-        
+
         (h1, h2, h3)
     }
 
@@ -74,7 +74,7 @@ impl LockFreeBlacklist {
         }
     }
 
-    /// Checagem puramente O(1). 
+    /// Checagem puramente O(1).
     /// Dropa atacantes sem envolver o agendador do SO ou filas async pesadas.
     #[inline(always)]
     pub fn is_banned(&self, ip: &IpAddr) -> bool {
@@ -86,8 +86,8 @@ impl LockFreeBlacklist {
     fn set_bit(&self, bit_index: usize) {
         let word_idx = bit_index / 64;
         let bit_offset = bit_index % 64;
-        
-        // Ordering::Relaxed garante a maior velocidade possível. 
+
+        // Ordering::Relaxed garante a maior velocidade possível.
         // Não nos importamos com a exata ordem entre threads aqui,
         // apenas com a eventual consistência da marcação.
         self.bitset[word_idx].fetch_or(1 << bit_offset, Ordering::Relaxed);

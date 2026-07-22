@@ -1477,13 +1477,14 @@ async fn auditor_export_epa(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     // Serialização determinística pura O(n): campos em ordem de declaração e sem espaços em branco.
-    let raw_json_str = serde_json::to_string(node).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let raw_json_str =
+        serde_json::to_string(node).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Assina com a chave Ed25519 do Nó (prova inquestionável de emissão)
     let signature_bytes = state.node_identity.sign(&raw_json_str);
 
     use base64::{engine::general_purpose, Engine as _};
-    
+
     // Criptografa o JSON bruto em B64
     let raw_evidence_b64 = general_purpose::STANDARD.encode(raw_json_str.as_bytes());
     let signature_b64 = general_purpose::STANDARD.encode(&signature_bytes);

@@ -248,9 +248,8 @@ impl PatchSlot {
 /// Usa `mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)`.
 fn allocate_page(size: usize) -> Result<NonNull<[u8]>, ExecutorError> {
     let aligned = size.next_multiple_of(PAGE_SIZE);
-    let layout =
-        Layout::from_size_align(aligned, PAGE_SIZE)
-            .map_err(|e| ExecutorError::AllocationFailed(e.to_string()))?;
+    let layout = Layout::from_size_align(aligned, PAGE_SIZE)
+        .map_err(|e| ExecutorError::AllocationFailed(e.to_string()))?;
 
     unsafe {
         let ptr = alloc(layout);
@@ -372,11 +371,7 @@ impl Executor {
 
         // ── 3. Copiar código novo ──
         unsafe {
-            std::ptr::copy_nonoverlapping(
-                patch.new_code.as_ptr(),
-                page_ptr,
-                size,
-            );
+            std::ptr::copy_nonoverlapping(patch.new_code.as_ptr(), page_ptr, size);
         }
 
         // ── 4. Tornar executável ──

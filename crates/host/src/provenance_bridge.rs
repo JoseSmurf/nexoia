@@ -15,6 +15,7 @@ pub struct EpochSeal {
 }
 
 pub struct ProvenanceBridge {
+    #[allow(dead_code)]
     pub membrane_tx: Sender<Event>,
     digestor_handle: Option<thread::JoinHandle<()>>,
     mmr_handle: Option<thread::JoinHandle<()>>,

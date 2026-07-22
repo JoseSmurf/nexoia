@@ -30,27 +30,38 @@ impl From<&ReactiveRule> for ReactiveRuleSnapshot {
     fn from(rule: &ReactiveRule) -> Self {
         use crate::nex::ast::Trigger;
 
-        let (trigger_type, trigger_params) = match &rule.trigger {
-            Trigger::HeartbeatMiss { threshold } => {
-                ("heartbeat_miss".to_string(), threshold.to_string())
-            }
-            Trigger::ReputationBelow { threshold } => {
-                ("reputation_below".to_string(), threshold.to_string())
-            }
-            Trigger::PeerConnected => ("peer_connected".to_string(), String::new()),
-            Trigger::PeerDisconnected => ("peer_disconnected".to_string(), String::new()),
-            Trigger::HandshakeCompleted => ("handshake_completed".to_string(), String::new()),
-            Trigger::HandshakeFailed => ("handshake_failed".to_string(), String::new()),
-            Trigger::SessionCreated => ("session_created".to_string(), String::new()),
-            Trigger::SessionRemoved => ("session_removed".to_string(), String::new()),
-        };
+        match rule {
+            ReactiveRule::Legacy { trigger, actions } => {
+                let (trigger_type, trigger_params) = match trigger {
+                    Trigger::HeartbeatMiss { threshold } => {
+                        ("heartbeat_miss".to_string(), threshold.to_string())
+                    }
+                    Trigger::ReputationBelow { threshold } => {
+                        ("reputation_below".to_string(), threshold.to_string())
+                    }
+                    Trigger::PeerConnected => ("peer_connected".to_string(), String::new()),
+                    Trigger::PeerDisconnected => ("peer_disconnected".to_string(), String::new()),
+                    Trigger::HandshakeCompleted => ("handshake_completed".to_string(), String::new()),
+                    Trigger::HandshakeFailed => ("handshake_failed".to_string(), String::new()),
+                    Trigger::SessionCreated => ("session_created".to_string(), String::new()),
+                    Trigger::SessionRemoved => ("session_removed".to_string(), String::new()),
+                };
 
-        let actions = rule.actions.iter().map(|a| format!("{:?}", a)).collect();
+                let actions_vec = actions.iter().map(|a| format!("{:?}", a)).collect();
 
-        ReactiveRuleSnapshot {
-            trigger_type,
-            trigger_params,
-            actions,
+                ReactiveRuleSnapshot {
+                    trigger_type,
+                    trigger_params,
+                    actions: actions_vec,
+                }
+            }
+            ReactiveRule::Block { event, threshold, window_secs, target, body: _ } => {
+                ReactiveRuleSnapshot {
+                    trigger_type: "block".to_string(),
+                    trigger_params: format!("{:?}_{}_{}", event, threshold, window_secs),
+                    actions: vec![target.clone()],
+                }
+            }
         }
     }
 }
@@ -117,7 +128,7 @@ impl ReactiveRuleSnapshot {
             })
             .collect();
 
-        Some(ReactiveRule { trigger, actions })
+        Some(ReactiveRule::Legacy { trigger, actions })
     }
 }
 

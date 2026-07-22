@@ -95,6 +95,7 @@ impl TokenKind {
             Self::RBrace => "}".to_string(),
             Self::LParen => "(".to_string(),
             Self::RParen => ")".to_string(),
+            Self::Newline => "\\n".to_string(),
         }
     }
 }

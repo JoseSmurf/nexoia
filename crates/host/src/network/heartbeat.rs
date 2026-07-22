@@ -178,6 +178,7 @@ pub async fn run_heartbeat_monitor(
                         &mut peer_states_mut,
                         &mut rep,
                         &peer_addrs_map,
+                        None,
                     );
                     drop(rep);
                     drop(peer_states_mut);

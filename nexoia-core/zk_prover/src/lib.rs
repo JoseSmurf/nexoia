@@ -225,6 +225,7 @@ fn derive_stub_commitment(stmt: &ZkStatement) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::worker::{ProverMode, ZkProver};
 
     fn make_seal(epoch: u64, root_byte: u8) -> EpochSeal {
         let mut root = [0u8; 32];

@@ -27,7 +27,7 @@
 //    ├── Supervisor::seal_epoch() — pipeline
 //    └── Supervisor::compute_confidence() — espelho da soberania
 
-use std::path::Path;
+// Removed use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;

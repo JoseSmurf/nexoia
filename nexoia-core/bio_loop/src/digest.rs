@@ -1,4 +1,4 @@
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
+use crossbeam_channel::{Receiver, RecvTimeoutError};
 use sha2::{Digest, Sha256};
 use std::{
     sync::{

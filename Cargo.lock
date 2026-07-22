@@ -5556,6 +5556,7 @@ dependencies = [
  "ahash 0.8.12",
  "anyhow",
  "axum",
+ "base64 0.22.1",
  "bio_loop",
  "blake3",
  "bumpalo",

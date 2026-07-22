@@ -29,7 +29,7 @@ impl ProvenanceBridge {
 
         let (membrane_tx, membrane_rx) = create_membrane();
 
-        let (hash_tx, hash_rx) = bounded::<[u8; 32]>(1024);
+        let (hash_tx, hash_rx) = bounded::<bio_loop::digest::MmrMessage>(1024);
 
         let mmr: Arc<Mutex<Mmr>> = Arc::new(Mutex::new(Mmr::new()));
 
@@ -58,11 +58,13 @@ impl ProvenanceBridge {
         let mmr_handle = thread::Builder::new()
             .name("mmr-consumer".into())
             .spawn(move || {
-                while let Ok(hash) = hash_rx.recv() {
-                    let mut guard = mmr_c.lock().expect("mmr lock");
-                    let idx = guard.leaf_count;
-                    guard.append(hash);
-                    let _ = wal_m.append_leaf(idx, &hash);
+                while let Ok(msg) = hash_rx.recv() {
+                    if let bio_loop::digest::MmrMessage::Hash(hash) = msg {
+                        let mut guard = mmr_c.lock().expect("mmr lock");
+                        let idx = guard.leaf_count;
+                        guard.append(hash);
+                        let _ = wal_m.append_leaf(idx, &hash);
+                    }
                 }
             })
             .expect("spawn mmr-consumer thread");

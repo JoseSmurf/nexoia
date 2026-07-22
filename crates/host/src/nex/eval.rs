@@ -255,6 +255,10 @@ fn execute_expanded(program: Program) -> Result<ExecutionResult, EvalError> {
     for statement in program.statements {
         match statement {
             Stmt::Use { .. } => unreachable!("imports must be expanded before evaluation"),
+            Stmt::ReactiveBlock { .. } => {
+                // Reactive blocks are ignored during normal evaluation, they are parsed
+                // ahead of time to build rules.
+            }
             Stmt::Node {
                 id,
                 value,

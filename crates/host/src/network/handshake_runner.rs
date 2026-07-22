@@ -696,7 +696,7 @@ pub async fn run_udp_listener(
                 }
 
                 // Gossip Sync
-                NetworkMessage::SyncEpoch { epoch_hash, signature } => {
+                NetworkMessage::SyncEpoch { epoch_hash: _epoch_hash, signature: _signature } => {
                     let trusted = trusted_peers.read().await;
                     if !trusted.contains(&addr) {
                         eprintln!("✗ SyncEpoch rejected: {} not in trusted peers", addr);

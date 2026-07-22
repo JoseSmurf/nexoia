@@ -59,6 +59,7 @@ epoch_mmr         = { path = "../../nexoia-core/epoch_mmr" }
 supervisor        = { path = "../../nexoia-core/supervisor" }
 crossbeam-channel = { workspace = true }
 gossip = { version = "0.2.0", path = "../../nexoia-core/gossip" }
+base64 = "0.22.1"
 
 [dev-dependencies]
 tempfile = "3"

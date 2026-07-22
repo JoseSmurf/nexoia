@@ -225,7 +225,7 @@ impl ReactiveEngine {
                         }
                     }
                 }
-                ReactiveRule::Block { event: rule_event, threshold, window_secs, target, body } => {
+                ReactiveRule::Block { event: rule_event, threshold: _threshold, window_secs: _window_secs, target: _target, body } => {
                     if let Some(peer_id) = self.matches_event(rule_event, event) {
                         // O threshold temporal (window) idealmente é checado consultando o PeerState.
                         // Como a avaliação é reativa, emitimos a ação RunNexBlock.
@@ -323,6 +323,8 @@ impl fmt::Display for NetworkEvent {
             }
             NetworkEvent::SessionCreated { addr } => write!(f, "session_created({})", addr),
             NetworkEvent::SessionRemoved { addr } => write!(f, "session_removed({})", addr),
+            NetworkEvent::ZkProofInvalid { addr } => write!(f, "zk_proof_invalid({})", addr),
+            NetworkEvent::MalformedPacket { addr } => write!(f, "malformed_packet({})", addr),
         }
     }
 }
@@ -332,10 +334,11 @@ impl fmt::Display for ExecutableAction {
         match self {
             ExecutableAction::Log(msg) => write!(f, "log(\"{}\")", msg),
             ExecutableAction::Emit(event) => write!(f, "emit({})", event),
-            ExecutableAction::MarkInactive { peer } => write!(f, "marcar_inativo({})", peer),
+            ExecutableAction::MarkInactive { peer } => write!(f, "mark_inactive({})", peer),
             ExecutableAction::AdjustReputation { peer, delta } => {
-                write!(f, "ajustar_reputacao({}, {})", peer, delta)
+                write!(f, "adjust_reputation({}, delta={})", peer, delta)
             }
+            ExecutableAction::RunNexBlock { target, .. } => write!(f, "run_nex_block({})", target),
         }
     }
 }

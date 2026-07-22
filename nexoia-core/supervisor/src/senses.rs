@@ -322,8 +322,8 @@ mod tests {
         let result = validate_packet(&buf);
         match result {
             Validation::Valid { data } => {
-                for i in 0..63 {
-                    assert_eq!(data[i], i as u8, "byte {i} mismatch");
+                for (i, &byte) in data.iter().enumerate() {
+                    assert_eq!(byte, i as u8, "byte {i} mismatch");
                 }
             }
             _ => panic!("expected Valid"),

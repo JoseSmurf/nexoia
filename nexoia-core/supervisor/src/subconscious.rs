@@ -200,8 +200,7 @@ impl HnswStore {
 
         // ── vectors.bin (append) ──
         let pos = self.vectors_file.seek(SeekFrom::End(0))?;
-        let bytes: &[u8; VECTOR_DIM * 4] =
-            unsafe { std::mem::transmute(&vector.data) };
+        let bytes: &[u8; VECTOR_DIM * 4] = unsafe { std::mem::transmute(&vector.data) };
         self.vectors_file.write_all(bytes)?;
 
         // ── meta.bin (append do offset) ──
@@ -217,16 +216,15 @@ impl HnswStore {
         let vector_bytes = VECTOR_DIM as u64 * 4;
         let offset = PAGE_SIZE + id * vector_bytes;
 
-        let mut file = OpenOptions::new().read(true).open(
-            self.path.join("vectors.bin"),
-        )?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .open(self.path.join("vectors.bin"))?;
         file.seek(SeekFrom::Start(offset))?;
 
         let mut raw = [0u8; VECTOR_DIM * 4];
         file.read_exact(&mut raw)?;
 
-        let data: [f32; VECTOR_DIM] =
-            unsafe { std::mem::transmute(raw) };
+        let data: [f32; VECTOR_DIM] = unsafe { std::mem::transmute(raw) };
         Ok(Vector { data })
     }
 
@@ -288,17 +286,27 @@ mod tests {
     fn cosine_similarity_identical_is_one() {
         let v = Vector::from_hash(&[0x42; 32]);
         let sim = v.cosine_similarity(&v);
-        assert!((sim - 1.0).abs() < 0.001, "identical vectors must have cosine 1.0");
+        assert!(
+            (sim - 1.0).abs() < 0.001,
+            "identical vectors must have cosine 1.0"
+        );
     }
 
     #[test]
     fn cosine_similarity_orthogonal_is_zero() {
-        let mut a = Vector { data: [0.0f32; VECTOR_DIM] };
-        let mut b = Vector { data: [0.0f32; VECTOR_DIM] };
+        let mut a = Vector {
+            data: [0.0f32; VECTOR_DIM],
+        };
+        let mut b = Vector {
+            data: [0.0f32; VECTOR_DIM],
+        };
         a.data[0] = 1.0;
         b.data[1] = 1.0;
         let sim = a.cosine_similarity(&b);
-        assert!((sim - 0.0).abs() < 0.001, "orthogonal vectors must have cosine 0.0");
+        assert!(
+            (sim - 0.0).abs() < 0.001,
+            "orthogonal vectors must have cosine 0.0"
+        );
     }
 
     #[test]

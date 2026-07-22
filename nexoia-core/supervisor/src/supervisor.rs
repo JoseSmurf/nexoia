@@ -238,10 +238,8 @@ impl Supervisor {
         // ── Canais ─────────────────────────────────────────────────────
         let (membrane_tx, membrane_rx) = create_membrane();
         let (hash_tx, hash_rx) = bounded::<[u8; 32]>(1024);
-        let (command_tx, command_rx) =
-            bounded::<SupervisorCommand>(COMMAND_CAPACITY);
-        let (consolidation_tx, consolidation_rx) =
-            bounded::<()>(CONSOLIDATION_SIGNAL_CAPACITY);
+        let (command_tx, command_rx) = bounded::<SupervisorCommand>(COMMAND_CAPACITY);
+        let (consolidation_tx, consolidation_rx) = bounded::<()>(CONSOLIDATION_SIGNAL_CAPACITY);
 
         // ── WAL + MMR ──────────────────────────────────────────────────
         let mmr: Arc<Mutex<Mmr>> = Arc::new(Mutex::new(Mmr::new()));
@@ -319,36 +317,28 @@ impl Supervisor {
         let running_cmd = Arc::clone(&running);
         let command_handle = thread::Builder::new()
             .name("cmd-processor".into())
-            .spawn(move || {
-                loop {
-                    if !running_cmd.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    match command_rx.recv_timeout(
-                        Duration::from_millis(100),
-                    ) {
-                        Ok(cmd) => match cmd {
-                            SupervisorCommand::Veto {
-                                patch_hash,
-                                reason_hash: _,
-                                hardware_context_hash: _,
-                            } => {
-                                veto_count_c.fetch_add(1, Ordering::Relaxed);
-                                let _ = wal_cmd.append(
-                                    RecordType::Leaf,
-                                    0,
-                                    &patch_hash,
-                                    VETO_CONTENT_ID,
-                                );
-                            }
-                            SupervisorCommand::Shutdown => {
-                                running_cmd.store(false, Ordering::Relaxed);
-                                break;
-                            }
-                        },
-                        Err(RecvTimeoutError::Timeout) => continue,
-                        Err(RecvTimeoutError::Disconnected) => break,
-                    }
+            .spawn(move || loop {
+                if !running_cmd.load(Ordering::Relaxed) {
+                    break;
+                }
+                match command_rx.recv_timeout(Duration::from_millis(100)) {
+                    Ok(cmd) => match cmd {
+                        SupervisorCommand::Veto {
+                            patch_hash,
+                            reason_hash: _,
+                            hardware_context_hash: _,
+                        } => {
+                            veto_count_c.fetch_add(1, Ordering::Relaxed);
+                            let _ =
+                                wal_cmd.append(RecordType::Leaf, 0, &patch_hash, VETO_CONTENT_ID);
+                        }
+                        SupervisorCommand::Shutdown => {
+                            running_cmd.store(false, Ordering::Relaxed);
+                            break;
+                        }
+                    },
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => break,
                 }
             })
             .expect("spawn cmd-processor thread");
@@ -379,11 +369,10 @@ impl Supervisor {
                     // o sinal chega mais cedo e acorda o worker.
                     // Se o sistema estiver ocioso, timeout expira e
                     // o worker faz um batch de consolidação.
-                    match consolidation_rx.recv_timeout(
-                        Duration::from_millis(CONSOLIDATION_POLL_MS),
-                    ) {
-                        Ok(())
-                        | Err(RecvTimeoutError::Timeout) => {
+                    match consolidation_rx
+                        .recv_timeout(Duration::from_millis(CONSOLIDATION_POLL_MS))
+                    {
+                        Ok(()) | Err(RecvTimeoutError::Timeout) => {
                             // Verifica se há trabalho novo
                             if let Ok(count) = wal_cons.record_count() {
                                 if count > last_watermark {
@@ -633,10 +622,7 @@ mod tests {
 
         // Confidence deve ser menor que sem o veto
         let conf_after_veto = sup.compute_confidence();
-        assert!(
-            conf_after_veto <= conf,
-            "veto must not increase confidence"
-        );
+        assert!(conf_after_veto <= conf, "veto must not increase confidence");
 
         // Shutdown
         sup.send_shutdown().ok();

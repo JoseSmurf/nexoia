@@ -30,8 +30,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use bio_loop::Event;
 use crate::supervisor::Supervisor;
+use bio_loop::Event;
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -114,10 +114,12 @@ impl RateLimiter {
     fn new() -> Self {
         let now = Instant::now();
         Self {
-            shards: Box::new([RateShard {
-                count: 0,
-                window_start: now,
-            }; RATE_LIMITER_SHARDS as usize]),
+            shards: Box::new(
+                [RateShard {
+                    count: 0,
+                    window_start: now,
+                }; RATE_LIMITER_SHARDS as usize],
+            ),
         }
     }
 

@@ -297,8 +297,9 @@ impl NodeContext {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let cfg = Config::from_env();
-    let id_path = cfg.data_dir.join("identity.json");
-    let data_path = cfg.data_dir.join("network.json");
+    let data_dir = cfg.data_dir.clone();
+    let id_path = data_dir.join("identity.json");
+    let data_path = data_dir.join("network.json");
     let passphrase = std::env::var("NEXOIA_PASSPHRASE")
         .ok()
         .map(|p| p.into_bytes());
@@ -462,7 +463,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ctx.spawn_tasks(&checkpoint_rules);
 
     // ── Provenance Bridge: Digestor + MMR em background ──
-    let provenance = ProvenanceBridge::spawn(&cfg.data_dir);
+    let provenance = ProvenanceBridge::spawn(&data_dir);
     println!(
         "Provenance:   bio-loop + epoch-mmr bridge active (membrane cap: {})",
         bio_loop::digest::MEMBRANE_CAPACITY

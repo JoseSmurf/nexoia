@@ -151,13 +151,13 @@ async fn bootstrap_peers(
 }
 
 fn add_default_rules(re: &mut crate::nex::reactive::ReactiveEngine) {
-    let _ = re.add_rule(crate::nex::reactive::ReactiveRule {
+    let _ = re.add_rule(crate::nex::reactive::ReactiveRule::Legacy {
         trigger: crate::nex::ast::Trigger::HeartbeatMiss { threshold: 3 },
         actions: vec![crate::nex::ast::ReactiveAction::Log(
             "Peer possivelmente inativo".into(),
         )],
     });
-    let _ = re.add_rule(crate::nex::reactive::ReactiveRule {
+    let _ = re.add_rule(crate::nex::reactive::ReactiveRule::Legacy {
         trigger: crate::nex::ast::Trigger::HeartbeatMiss { threshold: 5 },
         actions: vec![crate::nex::ast::ReactiveAction::MarkInactive {
             peer: "default".into(),

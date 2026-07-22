@@ -319,35 +319,37 @@ mod tests {
         assert_eq!(restored.len(), 2);
 
         // Verify first rule: HeartbeatMiss with Log + Emit
-        assert_eq!(restored[0].trigger, Trigger::HeartbeatMiss { threshold: 3 });
-        assert_eq!(restored[0].actions.len(), 2);
-        assert_eq!(
-            restored[0].actions[0],
-            ReactiveAction::Log("heartbeat lost".to_string())
-        );
-        assert_eq!(
-            restored[0].actions[1],
-            ReactiveAction::Emit("peer_down".to_string())
-        );
+        if let ReactiveRule::Legacy { trigger, actions } = &restored[0] {
+            assert_eq!(*trigger, Trigger::HeartbeatMiss { threshold: 3 });
+            assert_eq!(actions.len(), 2);
+            assert_eq!(
+                actions[0],
+                ReactiveAction::Log("heartbeat lost".to_string())
+            );
+            assert_eq!(actions[1], ReactiveAction::Emit("peer_down".to_string()));
+        } else {
+            panic!("Expected Legacy rule");
+        }
 
         // Verify second rule: ReputationBelow with MarkInactive + AdjustReputation
-        assert_eq!(
-            restored[1].trigger,
-            Trigger::ReputationBelow { threshold: 0.3 }
-        );
-        assert_eq!(restored[1].actions.len(), 2);
-        assert_eq!(
-            restored[1].actions[0],
-            ReactiveAction::MarkInactive {
-                peer: "bad_node".to_string()
-            }
-        );
-        assert_eq!(
-            restored[1].actions[1],
-            ReactiveAction::AdjustReputation {
-                peer: "bad_node".to_string(),
-                delta: -10
-            }
-        );
+        if let ReactiveRule::Legacy { trigger, actions } = &restored[1] {
+            assert_eq!(*trigger, Trigger::ReputationBelow { threshold: 0.3 });
+            assert_eq!(actions.len(), 2);
+            assert_eq!(
+                actions[0],
+                ReactiveAction::MarkInactive {
+                    peer: "bad_node".to_string()
+                }
+            );
+            assert_eq!(
+                actions[1],
+                ReactiveAction::AdjustReputation {
+                    peer: "bad_node".to_string(),
+                    delta: -10
+                }
+            );
+        } else {
+            panic!("Expected Legacy rule");
+        }
     }
 }

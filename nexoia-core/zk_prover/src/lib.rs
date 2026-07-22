@@ -1,6 +1,8 @@
 use epoch_mmr::EpochSeal;
 use sha2::{Digest, Sha256};
 
+pub mod worker;
+
 // ─── Statement e Witness ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy)]
@@ -48,82 +50,31 @@ impl ZkProof {
 
 // ─── Prover ───────────────────────────────────────────────────────────────────
 
-pub struct ZkProver {
+pub trait ProverEngine: Send + Sync {
+    fn consolidate(&mut self, seal: EpochSeal) -> ConsolidationResult;
+    fn prove_inclusion(
+        &self,
+        statement: ZkStatement,
+        witness: ZkWitness,
+    ) -> Result<ZkProof, ProverError>;
+    fn prove_nullification(
+        &self,
+        statement: ZkStatement,
+        witness: ZkWitness,
+    ) -> Result<ZkProof, ProverError>;
+    fn sealed_epoch_count(&self) -> usize;
+    fn get_seal(&self, epoch: u64) -> Option<&EpochSeal>;
+}
+
+pub struct StubProver {
     sealed_epochs: Vec<EpochSeal>,
-    pub mode: ProverMode,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProverMode {
-    Stub,
-    Real,
-}
-
-impl ZkProver {
-    pub fn new(mode: ProverMode) -> Self {
+impl StubProver {
+    pub fn new() -> Self {
         Self {
             sealed_epochs: Vec::new(),
-            mode,
         }
-    }
-
-    pub fn consolidate(&mut self, seal: EpochSeal) -> ConsolidationResult {
-        let epoch = seal.epoch;
-        let root = seal.root;
-        self.sealed_epochs.push(seal);
-
-        ConsolidationResult {
-            epoch,
-            root,
-            ready_to_prove: true,
-        }
-    }
-
-    pub fn prove_inclusion(
-        &self,
-        statement: ZkStatement,
-        witness: ZkWitness,
-    ) -> Result<ZkProof, ProverError> {
-        let seal_exists = self
-            .sealed_epochs
-            .iter()
-            .any(|s| s.root == statement.epoch_root && s.epoch == statement.epoch);
-
-        if !seal_exists {
-            return Err(ProverError::UnknownEpoch {
-                epoch: statement.epoch,
-            });
-        }
-
-        self.verify_witness_internally(&statement, &witness)?;
-
-        let proof_bytes = match self.mode {
-            ProverMode::Stub => derive_stub_commitment(&statement),
-            ProverMode::Real => {
-                return Err(ProverError::RealProofNotImplemented);
-            }
-        };
-
-        drop(witness);
-
-        Ok(ZkProof {
-            statement,
-            proof_bytes,
-            is_stub: matches!(self.mode, ProverMode::Stub),
-        })
-    }
-
-    pub fn prove_nullification(
-        &self,
-        statement: ZkStatement,
-        witness: ZkWitness,
-    ) -> Result<ZkProof, ProverError> {
-        if !statement.is_nullified {
-            return Err(ProverError::LeafNotNullified {
-                leaf_index: statement.leaf_index,
-            });
-        }
-        self.prove_inclusion(statement, witness)
     }
 
     fn verify_witness_internally(
@@ -141,12 +92,68 @@ impl ZkProver {
 
         Ok(())
     }
+}
 
-    pub fn sealed_epoch_count(&self) -> usize {
+impl ProverEngine for StubProver {
+    fn consolidate(&mut self, seal: EpochSeal) -> ConsolidationResult {
+        let epoch = seal.epoch;
+        let root = seal.root;
+        self.sealed_epochs.push(seal);
+
+        ConsolidationResult {
+            epoch,
+            root,
+            ready_to_prove: true,
+        }
+    }
+
+    fn prove_inclusion(
+        &self,
+        statement: ZkStatement,
+        witness: ZkWitness,
+    ) -> Result<ZkProof, ProverError> {
+        let seal_exists = self
+            .sealed_epochs
+            .iter()
+            .any(|s| s.root == statement.epoch_root && s.epoch == statement.epoch);
+
+        if !seal_exists {
+            return Err(ProverError::UnknownEpoch {
+                epoch: statement.epoch,
+            });
+        }
+
+        self.verify_witness_internally(&statement, &witness)?;
+
+        let proof_bytes = derive_stub_commitment(&statement);
+
+        drop(witness);
+
+        Ok(ZkProof {
+            statement,
+            proof_bytes,
+            is_stub: true,
+        })
+    }
+
+    fn prove_nullification(
+        &self,
+        statement: ZkStatement,
+        witness: ZkWitness,
+    ) -> Result<ZkProof, ProverError> {
+        if !statement.is_nullified {
+            return Err(ProverError::LeafNotNullified {
+                leaf_index: statement.leaf_index,
+            });
+        }
+        self.prove_inclusion(statement, witness)
+    }
+
+    fn sealed_epoch_count(&self) -> usize {
         self.sealed_epochs.len()
     }
 
-    pub fn get_seal(&self, epoch: u64) -> Option<&EpochSeal> {
+    fn get_seal(&self, epoch: u64) -> Option<&EpochSeal> {
         self.sealed_epochs.iter().find(|s| s.epoch == epoch)
     }
 }

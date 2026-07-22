@@ -12,8 +12,11 @@ statement      ::= use_stmt
                  | attest_stmt
                  | assert_stmt
                  | act_stmt
+                 | on_stmt
 
 use_stmt       ::= "use" spacing import_path
+on_stmt        ::= "on" spacing "event" spacing event_type "(" "threshold" ":" spacing int "," spacing "window" ":" spacing int "s" ")" spacing "for" spacing ident spacing "{" spacing statement* spacing "}"
+event_type     ::= "ZkProofInvalid" | "HeartbeatMiss" | "MalformedPacket"
 node_stmt      ::= "let" spacing ident spacing "=" spacing "node" spacing expr spacing strength
 derive_stmt    ::= "let" spacing ident spacing "=" spacing ident spacing "derive" spacing ident spacing "as" spacing type
 attest_stmt    ::= "attest" spacing ident spacing "with" spacing int spacing "external" spacing bool
@@ -41,4 +44,4 @@ non-comment line and its version must equal `1.0.0`.
 Reserved keywords: `use`, `let`, `node`, `derive`, `as`, `attest`, `with`,
 `external`, `assert`, `act`, `requires`, `true`, `false`, `allow`, `deny`,
 `escalate`, `unverifiable`, `local`, `witnessed`, `signed`, `anchored`, `i64`,
-`string`.
+`string`, `on`, `event`, `for`, `window`, `threshold`.

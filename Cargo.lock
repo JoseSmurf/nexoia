@@ -5334,6 +5334,7 @@ dependencies = [
  "epoch_mmr",
  "sha2 0.10.9",
  "tempfile",
+ "zk_prover",
 ]
 
 [[package]]
@@ -5568,6 +5569,7 @@ dependencies = [
  "epoch_mmr",
  "flurry",
  "futures-util",
+ "gossip",
  "hex",
  "hkdf",
  "hyper-util",
@@ -7339,6 +7341,7 @@ dependencies = [
 name = "zk_prover"
 version = "0.2.0"
 dependencies = [
+ "crossbeam-channel",
  "epoch_mmr",
  "sha2 0.10.9",
 ]

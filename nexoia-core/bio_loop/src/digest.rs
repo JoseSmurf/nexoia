@@ -74,15 +74,17 @@ impl DigestorMetrics {
 /// 4. `recv_timeout` de crossbeam retorna o `Event` por valor (cópia),
 ///    que é imediatamente consumido. O canal copia via `memcpy` do slot
 ///    interno — sem heap.
+pub enum MmrMessage {
+    Hash([u8; 32]),
+    SealEpoch,
+}
+
 pub struct Digestor {
     rx: Receiver<Event>,
     running: Arc<AtomicBool>,
     pub metrics: DigestorMetrics,
-    /// Canal opcional de saída de hashes.
-    /// Quando Some, cada `Event::Data` processado envia o SHA-256 resultante
-    /// ([u8; 32]) por `try_send` — zero alocação, non-blocking.
-    /// O receptor (tipicamente epoch_mmr::Mmr::append) consome em thread própria.
-    hash_tx: Option<Sender<[u8; 32]>>,
+    /// Canal para envio assíncrono dos hashes processados (opcional)
+    pub hash_tx: Option<crossbeam_channel::Sender<MmrMessage>>,
 }
 
 impl Digestor {
@@ -98,8 +100,8 @@ impl Digestor {
     /// Conecta um canal de saída de hashes ao Digestor.
     /// Cada `Event::Data` processado terá seu SHA-256 enviado por `try_send`
     /// neste canal — zero alocação, zero blocking.
-    pub fn set_hash_channel(&mut self, hash_tx: Sender<[u8; 32]>) {
-        self.hash_tx = Some(hash_tx);
+    pub fn set_hash_channel(&mut self, tx: crossbeam_channel::Sender<MmrMessage>) {
+        self.hash_tx = Some(tx);
     }
 
     /// Executa o loop principal de digestão. Bloqueia a thread chamadora.
@@ -189,14 +191,18 @@ impl Digestor {
                 // os 32 bytes por memcpy. Se o canal estourar, o hash é
                 // dropped (backpressure natural).
                 if let Some(ref tx) = self.hash_tx {
-                    let _ = tx.try_send(*out);
+                    let _ = tx.try_send(MmrMessage::Hash(*out));
                 }
             }
 
             Event::Heartbeat(tick) => {
                 // Tick recebido do Coração — aciona tarefas periódicas.
-                // TODO (Loop 2): se tick % N == 0, selar época no epoch_mmr
-                let _ = tick;
+                // Loop 2: selar época no epoch_mmr a cada 10 ticks (10s)
+                if tick % 10 == 0 {
+                    if let Some(ref tx) = self.hash_tx {
+                        let _ = tx.try_send(MmrMessage::SealEpoch);
+                    }
+                }
             }
 
             Event::Shutdown => {

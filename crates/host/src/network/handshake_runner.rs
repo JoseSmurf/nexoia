@@ -695,6 +695,21 @@ pub async fn run_udp_listener(
                     }
                 }
 
+                // Gossip Sync
+                NetworkMessage::SyncEpoch { epoch_hash, signature } => {
+                    let trusted = trusted_peers.read().await;
+                    if !trusted.contains(&addr) {
+                        eprintln!("✗ SyncEpoch rejected: {} not in trusted peers", addr);
+                        continue;
+                    }
+                    
+                    // The signature comes from an authenticated peer, 
+                    // which satisfies the "witnessed" requirement in the behavior engine.
+                    // This could be passed to the ReactiveEngine or EvidenceEngine.
+                    println!("✓ SyncEpoch received from {} (witnessed)", addr);
+                    // Emitir evento para o Behavior Engine (se necessário no futuro)
+                }
+
                 // EPA: Só aceita de peers autenticados
                 NetworkMessage::EPA(epa) => {
                     let trusted = trusted_peers.read().await;

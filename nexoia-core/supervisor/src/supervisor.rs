@@ -217,6 +217,7 @@ pub struct Supervisor {
     mmr_handle: Option<thread::JoinHandle<()>>,
     command_handle: Option<thread::JoinHandle<()>>,
     consolidation_handle: Option<thread::JoinHandle<()>>,
+    zk_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl Supervisor {
@@ -232,14 +233,18 @@ impl Supervisor {
     ///    - mmr-consumer: consome hashes, alimenta MMR + WAL
     ///    - cmd-processor: processa Vetos e Shutdown
     ///    - consolidation-worker: vector store em background (baixa prioridade)
-    pub fn spawn(data_path: &Path) -> Self {
+    pub fn spawn(
+        data_path: &std::path::Path,
+    ) -> (Self, crossbeam_channel::Receiver<zk_prover::ZkProof>) {
         let running = Arc::new(AtomicBool::new(true));
 
         // ── Canais ─────────────────────────────────────────────────────
         let (membrane_tx, membrane_rx) = create_membrane();
-        let (hash_tx, hash_rx) = bounded::<[u8; 32]>(1024);
+        let (hash_tx, hash_rx) = bounded::<bio_loop::digest::MmrMessage>(1024);
         let (command_tx, command_rx) = bounded::<SupervisorCommand>(COMMAND_CAPACITY);
         let (consolidation_tx, consolidation_rx) = bounded::<()>(CONSOLIDATION_SIGNAL_CAPACITY);
+        let (zk_tx, zk_rx) = bounded::<zk_prover::worker::ProverCommand>(64);
+        let (proof_tx, proof_rx) = bounded::<zk_prover::ZkProof>(64);
 
         // ── WAL + MMR ──────────────────────────────────────────────────
         let mmr: Arc<Mutex<Mmr>> = Arc::new(Mutex::new(Mmr::new()));
@@ -289,19 +294,33 @@ impl Supervisor {
             .spawn(move || {
                 let mut batch_counter = 0u64;
 
-                while let Ok(hash) = hash_rx.recv() {
-                    let idx;
-                    {
-                        let mut guard = mmr_c.lock().expect("mmr lock");
-                        idx = guard.leaf_count;
-                        guard.append(hash);
-                    }
-                    let _ = wal_c.append_leaf(idx, &hash);
-                    data_count_c.fetch_add(1, Ordering::Relaxed);
+                while let Ok(msg) = hash_rx.recv() {
+                    match msg {
+                        bio_loop::digest::MmrMessage::Hash(hash) => {
+                            let idx;
+                            {
+                                let mut guard = mmr_c.lock().expect("mmr lock");
+                                idx = guard.leaf_count;
+                                guard.append(hash);
+                            }
+                            let _ = wal_c.append_leaf(idx, &hash);
+                            data_count_c.fetch_add(1, Ordering::Relaxed);
 
-                    batch_counter += 1;
-                    if batch_counter.is_multiple_of(CONSOLIDATION_INTERVAL) {
-                        let _ = consolidation_tx_c.try_send(());
+                            batch_counter += 1;
+                            if batch_counter.is_multiple_of(CONSOLIDATION_INTERVAL) {
+                                let _ = consolidation_tx_c.try_send(());
+                            }
+                        }
+                        bio_loop::digest::MmrMessage::SealEpoch => {
+                            let mut guard = mmr_c.lock().expect("mmr lock");
+                            if guard.leaf_count > 0 {
+                                if let Ok(seal) = guard.seal_epoch() {
+                                    println!("\x1b[35m[MMR] Época {} selada. Root: {:02x}{:02x}{:02x}{:02x}\x1b[0m", 
+                                        seal.epoch, seal.root[0], seal.root[1], seal.root[2], seal.root[3]);
+                                    let _ = zk_tx.try_send(zk_prover::worker::ProverCommand::Seal(seal));
+                                }
+                            }
+                        }
                     }
                 }
             })
@@ -405,7 +424,9 @@ impl Supervisor {
             })
             .expect("spawn consolidation-worker thread");
 
-        Self {
+        let zk_handle = zk_prover::worker::ZkWorker::spawn(zk_rx, proof_tx);
+
+        let supervisor = Self {
             membrane_tx,
             command_tx,
             wal,
@@ -419,7 +440,10 @@ impl Supervisor {
             mmr_handle: Some(mmr_handle),
             command_handle: Some(command_handle),
             consolidation_handle: Some(consolidation_handle),
-        }
+            zk_handle: Some(zk_handle),
+        };
+
+        (supervisor, proof_rx)
     }
 
     /// Alimenta um evento no bio_loop.
@@ -563,6 +587,9 @@ impl Drop for Supervisor {
             let _ = handle.join();
         }
         if let Some(handle) = self.consolidation_handle.take() {
+            let _ = handle.join();
+        }
+        if let Some(handle) = self.zk_handle.take() {
             let _ = handle.join();
         }
     }

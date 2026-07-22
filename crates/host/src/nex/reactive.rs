@@ -45,6 +45,14 @@ pub enum NetworkEvent {
     SessionRemoved {
         addr: String,
     },
+    /// Prova ZK Inválida recebida de um peer
+    ZkProofInvalid {
+        peer_id: String,
+    },
+    /// Pacote malformado recebido de um peer
+    MalformedPacket {
+        peer_id: String,
+    },
 }
 
 /// Ação a ser executada pelo sistema.
@@ -54,13 +62,23 @@ pub enum ExecutableAction {
     Emit(String),
     MarkInactive { peer: String },
     AdjustReputation { peer: String, delta: i32 },
+    RunNexBlock { target: String, body: Vec<crate::nex::ast::Stmt> },
 }
 
 /// Regra reativa parseada de um programa NEX.
 #[derive(Debug, Clone)]
-pub struct ReactiveRule {
-    pub trigger: Trigger,
-    pub actions: Vec<ReactiveAction>,
+pub enum ReactiveRule {
+    Legacy {
+        trigger: Trigger,
+        actions: Vec<ReactiveAction>,
+    },
+    Block {
+        event: crate::nex::ast::EventType,
+        threshold: u32,
+        window_secs: u64,
+        target: String,
+        body: Vec<crate::nex::ast::Stmt>,
+    },
 }
 
 /// Resultado da avaliação de regras.
@@ -156,9 +174,20 @@ impl ReactiveEngine {
         let mut count = 0;
         for stmt in &program.statements {
             if let crate::nex::ast::Stmt::On { trigger, actions } = stmt {
-                let rule = ReactiveRule {
+                let rule = ReactiveRule::Legacy {
                     trigger: trigger.clone(),
                     actions: actions.clone(),
+                };
+                if self.add_rule(rule).is_ok() {
+                    count += 1;
+                }
+            } else if let crate::nex::ast::Stmt::ReactiveBlock { event, threshold, window_secs, target, body } = stmt {
+                let rule = ReactiveRule::Block {
+                    event: event.clone(),
+                    threshold: *threshold,
+                    window_secs: *window_secs,
+                    target: target.clone(),
+                    body: body.clone(),
                 };
                 if self.add_rule(rule).is_ok() {
                     count += 1;
@@ -185,17 +214,43 @@ impl ReactiveEngine {
         let mut actions = Vec::new();
 
         for rule in &self.rules {
-            if self.matches_trigger(&rule.trigger, event) {
-                matched = true;
-                for action in &rule.actions {
-                    if let Some(executable) = self.prepare_action(action, event) {
-                        actions.push(executable);
+            match rule {
+                ReactiveRule::Legacy { trigger, actions: rule_actions } => {
+                    if self.matches_trigger(trigger, event) {
+                        matched = true;
+                        for action in rule_actions {
+                            if let Some(executable) = self.prepare_action(action, event) {
+                                actions.push(executable);
+                            }
+                        }
+                    }
+                }
+                ReactiveRule::Block { event: rule_event, threshold, window_secs, target, body } => {
+                    if let Some(peer_id) = self.matches_event(rule_event, event) {
+                        // O threshold temporal (window) idealmente é checado consultando o PeerState.
+                        // Como a avaliação é reativa, emitimos a ação RunNexBlock.
+                        // O componente de execução (Supervisor) usará o PeerState para validar
+                        // o threshold e o tempo, e se satisfeito, avaliará os nós de evidência.
+                        matched = true;
+                        actions.push(ExecutableAction::RunNexBlock {
+                            target: peer_id,
+                            body: body.clone(),
+                        });
                     }
                 }
             }
         }
 
         EvaluationResult { matched, actions }
+    }
+
+    fn matches_event(&self, rule_event: &crate::nex::ast::EventType, event: &NetworkEvent) -> Option<String> {
+        match (rule_event, event) {
+            (crate::nex::ast::EventType::ZkProofInvalid, NetworkEvent::ZkProofInvalid { peer_id }) => Some(peer_id.clone()),
+            (crate::nex::ast::EventType::HeartbeatMiss, NetworkEvent::HeartbeatMiss { .. }) => None, // Lógica baseada em peer necessária
+            (crate::nex::ast::EventType::MalformedPacket, NetworkEvent::MalformedPacket { peer_id }) => Some(peer_id.clone()),
+            _ => None,
+        }
     }
 
     fn matches_trigger(&self, trigger: &Trigger, event: &NetworkEvent) -> bool {

@@ -65,6 +65,20 @@ pub enum Stmt {
         trigger: Trigger,
         actions: Vec<ReactiveAction>,
     },
+    ReactiveBlock {
+        event: EventType,
+        threshold: u32,
+        window_secs: u64,
+        target: String,
+        body: Vec<Stmt>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EventType {
+    ZkProofInvalid,
+    HeartbeatMiss,
+    MalformedPacket,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

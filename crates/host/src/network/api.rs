@@ -249,6 +249,7 @@ fn build_router(state: ApiState) -> Router {
         .route("/epa", post(receive_epa))
         .route("/epa/encrypted", post(receive_encrypted_epa))
         .route("/epa/list", get(list_epas))
+        .route("/auditor/epa/:id/export", get(auditor_export_epa))
         .route("/epa/:id/verify", post(verify_epa_endpoint))
         .route("/epa/:id/verify-quick", get(verify_quick_endpoint))
         .route("/compliance/:epa_id", get(get_compliance))
@@ -1449,4 +1450,48 @@ mod tests {
         let index = state.lgpd_index.read().await;
         assert_eq!(index.lookup("subject4").len(), 1);
     }
+}
+
+// ============================================
+// FASE 7: AUDITOR API (O Portal da Verdade)
+// ============================================
+
+#[derive(Serialize)]
+pub struct AuditorExportResponse {
+    pub epa_id: String,
+    pub raw_evidence_b64: String, // Base64 do payload determinístico do ProvenanceNode
+    pub signature_b64: String,    // Assinatura Ed25519 em Base64 para uso em tribunal
+    pub pubkey_b64: String,       // Chave pública do nó auditor
+}
+
+/// GET /auditor/epa/:id/export
+/// Exporta a evidência bruta formatada determinística e assinada
+async fn auditor_export_epa(
+    State(state): State<ApiState>,
+    axum::extract::Path(epa_id): axum::extract::Path<String>,
+) -> Result<Json<AuditorExportResponse>, StatusCode> {
+    let prov_nodes = state.provenance_nodes.read().await;
+    let node = prov_nodes
+        .iter()
+        .find(|n| n.node_id == epa_id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    // Serialização determinística pura O(n): campos em ordem de declaração e sem espaços em branco.
+    let raw_json_str = serde_json::to_string(node).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Assina com a chave Ed25519 do Nó (prova inquestionável de emissão)
+    let signature_bytes = state.node_identity.sign(&raw_json_str);
+
+    use base64::{engine::general_purpose, Engine as _};
+    
+    // Criptografa o JSON bruto em B64
+    let raw_evidence_b64 = general_purpose::STANDARD.encode(raw_json_str.as_bytes());
+    let signature_b64 = general_purpose::STANDARD.encode(&signature_bytes);
+
+    Ok(Json(AuditorExportResponse {
+        epa_id,
+        raw_evidence_b64,
+        signature_b64,
+        pubkey_b64: state.node_identity.public_key.clone(),
+    }))
 }

@@ -71,6 +71,11 @@ enum TokenKind {
     Lt,
     Colon,
     Comma,
+    LBrace,
+    RBrace,
+    LParen,
+    RParen,
+    Newline,
 }
 
 impl TokenKind {
@@ -86,6 +91,10 @@ impl TokenKind {
             Self::Lt => "<".to_string(),
             Self::Colon => ":".to_string(),
             Self::Comma => ",".to_string(),
+            Self::LBrace => "{".to_string(),
+            Self::RBrace => "}".to_string(),
+            Self::LParen => "(".to_string(),
+            Self::RParen => ")".to_string(),
         }
     }
 }
@@ -94,6 +103,10 @@ pub fn parse(source: &str) -> Result<Program, ParseError> {
     let mut statements = Vec::new();
     let mut first_statement_seen = false;
 
+    let mut current_block_tokens = Vec::new();
+    let mut brace_depth = 0;
+    let mut statement_line_no = 0;
+
     for (line_idx, raw_line) in source.lines().enumerate() {
         let line_no = line_idx + 1;
         let trimmed = raw_line.trim_start();
@@ -101,7 +114,7 @@ pub fn parse(source: &str) -> Result<Program, ParseError> {
             continue;
         }
 
-        if !first_statement_seen {
+        if !first_statement_seen && brace_depth == 0 {
             if let Some(found) = parse_version_header(trimmed) {
                 if found != NEX_VERSION {
                     return Err(ParseError::UnsupportedVersion {
@@ -115,14 +128,41 @@ pub fn parse(source: &str) -> Result<Program, ParseError> {
             if is_comment_line(trimmed) {
                 continue;
             }
+        } else if is_comment_line(trimmed) {
+            continue;
         }
 
         let tokens = lex_line(raw_line, line_no)?;
         if tokens.is_empty() {
             continue;
         }
-        first_statement_seen = true;
-        statements.push(parse_statement(&tokens, line_no)?);
+        
+        if current_block_tokens.is_empty() {
+            statement_line_no = line_no;
+        }
+
+        for token in &tokens {
+            if token.kind == TokenKind::LBrace { brace_depth += 1; }
+            if token.kind == TokenKind::RBrace { brace_depth -= 1; }
+        }
+
+        current_block_tokens.extend(tokens);
+
+        if brace_depth == 0 {
+            first_statement_seen = true;
+            statements.push(parse_statement(&current_block_tokens, statement_line_no)?);
+            current_block_tokens.clear();
+        } else {
+            // Se estamos no meio de um bloco, inserimos um Newline para separar statements internos
+            current_block_tokens.push(Token {
+                kind: TokenKind::Newline,
+                column: 0,
+            });
+        }
+    }
+
+    if brace_depth != 0 {
+        return Err(ParseError::new(statement_line_no, 0, "unclosed block"));
     }
 
     Ok(Program { statements })
@@ -194,6 +234,34 @@ fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
                 idx += 1;
                 Token {
                     kind: TokenKind::Comma,
+                    column,
+                }
+            }
+            '{' => {
+                idx += 1;
+                Token {
+                    kind: TokenKind::LBrace,
+                    column,
+                }
+            }
+            '}' => {
+                idx += 1;
+                Token {
+                    kind: TokenKind::RBrace,
+                    column,
+                }
+            }
+            '(' => {
+                idx += 1;
+                Token {
+                    kind: TokenKind::LParen,
+                    column,
+                }
+            }
+            ')' => {
+                idx += 1;
+                Token {
+                    kind: TokenKind::RParen,
                     column,
                 }
             }
@@ -340,6 +408,10 @@ fn lex_line(line: &str, line_no: usize) -> Result<Vec<Token>, ParseError> {
                         || next == '<'
                         || next == ':'
                         || next == ','
+                        || next == '{'
+                        || next == '}'
+                        || next == '('
+                        || next == ')'
                         || (next == '/' && chars.get(idx + 1) == Some(&'/'))
                     {
                         break;
@@ -762,6 +834,10 @@ fn parse_on(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError> {
     })?;
     let trigger_word = word(trigger_token, line_no)?;
 
+    if trigger_word == "event" {
+        return parse_reactive_block(tokens, line_no);
+    }
+
     let trigger = match trigger_word.as_str() {
         "heartbeat_miss" => {
             // on heartbeat_miss > <threshold>:
@@ -955,6 +1031,124 @@ fn parse_reactive_action(
             format!("unknown action '{action_word}'"),
         )),
     }
+}
+
+// Blocks reativos
+
+fn parse_reactive_block(tokens: &[Token], line_no: usize) -> Result<Stmt, ParseError> {
+    // on event ZkProofInvalid(threshold: 5, window: 60s) for peer_id { ... }
+    use crate::network::transport::MAX_REACTIVE_THRESHOLD;
+    
+    // token 0: "on"
+    // token 1: "event"
+    let event_token = tokens.get(2).ok_or_else(|| ParseError::new(line_no, 1, "expected EventType after 'event'"))?;
+    let event_word = word(event_token, line_no)?;
+    
+    let event = match event_word.as_str() {
+        "ZkProofInvalid" => crate::nex::ast::EventType::ZkProofInvalid,
+        "HeartbeatMiss" => crate::nex::ast::EventType::HeartbeatMiss,
+        "MalformedPacket" => crate::nex::ast::EventType::MalformedPacket,
+        _ => return Err(ParseError::new(line_no, event_token.column, format!("unknown event type '{event_word}'"))),
+    };
+    
+    // (
+    let mut idx = 3;
+    let lparen = tokens.get(idx).ok_or_else(|| ParseError::new(line_no, 1, "expected '(' after EventType"))?;
+    if !matches!(lparen.kind, TokenKind::LParen) { return Err(ParseError::new(line_no, lparen.column, "expected '(' after EventType")); }
+    idx += 1;
+    
+    // threshold
+    let kw_threshold = expect_word(tokens, idx, line_no, "expected 'threshold'")?;
+    if kw_threshold != "threshold" { return Err(ParseError::new(line_no, tokens[idx].column, "expected 'threshold'")); }
+    idx += 1;
+    expect_eq(tokens, idx, line_no, "expected ':' after threshold").or_else(|_| {
+        if matches!(tokens.get(idx).map(|t| &t.kind), Some(TokenKind::Colon)) { Ok(()) } else { Err(ParseError::new(line_no, tokens[idx].column, "expected ':' after threshold")) }
+    })?;
+    idx += 1;
+    
+    let threshold_token = tokens.get(idx).ok_or_else(|| ParseError::new(line_no, 1, "expected threshold value"))?;
+    let threshold = match &threshold_token.kind {
+        TokenKind::Int(v) => *v as u32,
+        _ => return Err(ParseError::new(line_no, threshold_token.column, "expected integer for threshold")),
+    };
+    if threshold as usize > MAX_REACTIVE_THRESHOLD {
+        return Err(ParseError::new(line_no, threshold_token.column, format!("threshold {threshold} exceeds hard limit {MAX_REACTIVE_THRESHOLD}")));
+    }
+    idx += 1;
+    
+    // ,
+    let comma = tokens.get(idx).ok_or_else(|| ParseError::new(line_no, 1, "expected ','"))?;
+    if !matches!(comma.kind, TokenKind::Comma) { return Err(ParseError::new(line_no, comma.column, "expected ','")); }
+    idx += 1;
+    
+    // window
+    let kw_window = expect_word(tokens, idx, line_no, "expected 'window'")?;
+    if kw_window != "window" { return Err(ParseError::new(line_no, tokens[idx].column, "expected 'window'")); }
+    idx += 1;
+    expect_eq(tokens, idx, line_no, "expected ':' after window").or_else(|_| {
+        if matches!(tokens.get(idx).map(|t| &t.kind), Some(TokenKind::Colon)) { Ok(()) } else { Err(ParseError::new(line_no, tokens[idx].column, "expected ':' after window")) }
+    })?;
+    idx += 1;
+    
+    let window_token = tokens.get(idx).ok_or_else(|| ParseError::new(line_no, 1, "expected window value"))?;
+    let window_secs = match &window_token.kind {
+        TokenKind::Int(v) => *v as u64,
+        _ => return Err(ParseError::new(line_no, window_token.column, "expected integer for window")),
+    };
+    idx += 1;
+    
+    let s_token = expect_word(tokens, idx, line_no, "expected 's' after window integer")?;
+    if s_token != "s" { return Err(ParseError::new(line_no, tokens[idx].column, "expected 's' after window integer")); }
+    idx += 1;
+    
+    // )
+    let rparen = tokens.get(idx).ok_or_else(|| ParseError::new(line_no, 1, "expected ')'"))?;
+    if !matches!(rparen.kind, TokenKind::RParen) { return Err(ParseError::new(line_no, rparen.column, "expected ')'")); }
+    idx += 1;
+    
+    // for
+    let kw_for = expect_word(tokens, idx, line_no, "expected 'for'")?;
+    if kw_for != "for" { return Err(ParseError::new(line_no, tokens[idx].column, "expected 'for'")); }
+    idx += 1;
+    
+    // target
+    let target = expect_word(tokens, idx, line_no, "expected target identifier")?;
+    idx += 1;
+    
+    // {
+    let lbrace = tokens.get(idx).ok_or_else(|| ParseError::new(line_no, 1, "expected '{'"))?;
+    if !matches!(lbrace.kind, TokenKind::LBrace) { return Err(ParseError::new(line_no, lbrace.column, "expected '{'")); }
+    idx += 1;
+    
+    // body statements until '}'
+    let mut body = Vec::new();
+    let mut current_stmt = Vec::new();
+    
+    while idx < tokens.len() {
+        let t = &tokens[idx];
+        if matches!(t.kind, TokenKind::RBrace) {
+            if !current_stmt.is_empty() {
+                body.push(parse_statement(&current_stmt, line_no)?);
+            }
+            break;
+        } else if matches!(t.kind, TokenKind::Newline) {
+            if !current_stmt.is_empty() {
+                body.push(parse_statement(&current_stmt, line_no)?);
+                current_stmt.clear();
+            }
+        } else {
+            current_stmt.push(t.clone());
+        }
+        idx += 1;
+    }
+    
+    Ok(Stmt::ReactiveBlock {
+        event,
+        threshold,
+        window_secs,
+        target,
+        body,
+    })
 }
 
 // Tokens para comparação e operadores lógicos
@@ -1241,3 +1435,5 @@ mod tests {
         assert!(err.to_string().contains("expected 'requires' after action"));
     }
 }
+
+

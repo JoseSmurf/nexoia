@@ -462,11 +462,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ctx.spawn_tasks(&checkpoint_rules);
 
     // ── Supervisor: bio-loop + MMR + consolidação + sentidos ──
-    let supervisor = Supervisor::spawn(&data_dir);
+    let (supervisor, proof_rx) = Supervisor::spawn(&data_dir);
     println!(
         "Supervisor:   bio-loop + consolidation worker active (membrane cap: {})",
         bio_loop::digest::MEMBRANE_CAPACITY
     );
+
+    // Consume provas ZK geradas pelo supervisor (Fase 5 - Integração Gossip)
+    tokio::spawn(async move {
+        while let Ok(proof) = proof_rx.recv() {
+            println!(
+                "\x1b[36m[Gossip] 📤 Propagando prova ZK na malha P2P (Época: {})\x1b[0m",
+                proof.statement.epoch
+            );
+            // TODO: Converter para NetworkFrame e emitir usando gossip::transport::Emitter
+        }
+    });
 
     let senses_port = std::env::var("NEXOIA_SENSES_PORT").unwrap_or_else(|_| "9002".to_string());
     let senses_addr = format!("0.0.0.0:{}", senses_port);

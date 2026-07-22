@@ -1,4 +1,4 @@
-pub mod api;
+﻿pub mod api;
 pub mod crypto;
 pub mod crypto_key;
 pub mod epa;
@@ -13,3 +13,5 @@ pub mod secure_transport;
 pub mod session;
 pub mod transport;
 pub mod verify;
+pub mod membrane;
+

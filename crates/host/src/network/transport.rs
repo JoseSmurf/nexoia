@@ -58,12 +58,19 @@ pub enum NetworkMessage {
         x25519_pubkey: Vec<u8>, // responder's ephemeral x25519
         signature: Vec<u8>,     // Ed25519 signature over session params
     },
+    // Gossip Sync para Behavior Engine
+    SyncEpoch {
+        epoch_hash: String,
+        signature: Vec<u8>, // Assinatura Ed25519 para garantir "witnessed"
+    },
     SessionKeyConfirm {
         encrypted_ok: Vec<u8>,
     },
     // Mensagem encriptada (após handshake)
     SecureMessage(crate::network::secure_transport::SecureMessage),
 }
+
+pub const MAX_REACTIVE_THRESHOLD: usize = 16;
 
 /// Estado de um peer para controle de heartbeat e reconexão.
 /// Usa sliding window para ser tolerante a latência e packet loss.
@@ -76,6 +83,10 @@ pub struct PeerState {
     pub next_reconnect: DateTime<Utc>,
     /// Janela de heartbeat: armazena os últimos N heartbeats recebidos
     pub heartbeat_window: SmallVec<[DateTime<Utc>; HEARTBEAT_WINDOW_SIZE]>,
+    /// Ring buffer pre-alocado para monitoramento de pacotes ZKProof inválidos
+    pub zk_invalid_timestamps: [i64; MAX_REACTIVE_THRESHOLD],
+    /// Cursor para inserção circular no Ring Buffer
+    pub zk_invalid_cursor: usize,
 }
 
 /// Tamanho da janela de heartbeat para sliding window.
@@ -99,6 +110,8 @@ impl PeerState {
             reconnect_attempts: 0,
             next_reconnect: Utc::now(),
             heartbeat_window: SmallVec::new(),
+            zk_invalid_timestamps: [0; MAX_REACTIVE_THRESHOLD],
+            zk_invalid_cursor: 0,
         }
     }
 
@@ -147,6 +160,35 @@ impl PeerState {
         // Backoff: 10s, 20s, 40s, 80s, 160s (máx 5 tentativas)
         let backoff_secs = (2u32.pow(self.reconnect_attempts.min(5)) * 5) as i64;
         self.next_reconnect = Utc::now() + chrono::Duration::seconds(backoff_secs);
+    }
+
+    /// O(1) Zero-allocation ring buffer insert
+    pub fn record_zk_invalid(&mut self) {
+        let now = Utc::now().timestamp();
+        self.zk_invalid_timestamps[self.zk_invalid_cursor % MAX_REACTIVE_THRESHOLD] = now;
+        self.zk_invalid_cursor = self.zk_invalid_cursor.wrapping_add(1);
+    }
+
+    /// O(1) Zero-allocation threshold check
+    pub fn check_zk_invalid_threshold(&self, threshold: u32, window_secs: u64) -> bool {
+        if threshold == 0 || threshold as usize > MAX_REACTIVE_THRESHOLD {
+            return false;
+        }
+
+        // Se ainda não tivemos eventos suficientes
+        if self.zk_invalid_cursor < threshold as usize {
+            return false;
+        }
+
+        // Pega o timestamp do evento mais antigo dentro do threshold solicitado
+        // Como o cursor aponta para o próximo a ser inserido, o evento N passos atrás é:
+        let oldest_idx = (self.zk_invalid_cursor - threshold as usize) % MAX_REACTIVE_THRESHOLD;
+        let oldest_time = self.zk_invalid_timestamps[oldest_idx];
+
+        let now = Utc::now().timestamp();
+
+        // Verifica se a diferença de tempo é menor ou igual à janela
+        (now - oldest_time) <= window_secs as i64
     }
 
     /// Verifica se é hora de tentar reconexão.
@@ -238,6 +280,8 @@ pub struct UdpTransport {
     socket: UdpSocket,
     /// Pool de buffers para zero-copy receive
     recv_pool: Mutex<Vec<BytesMut>>,
+    /// Filtro de Bloom lock-free para banimento imediato
+    pub membrane: Arc<crate::network::membrane::LockFreeBlacklist>,
 }
 
 impl UdpTransport {
@@ -246,6 +290,7 @@ impl UdpTransport {
         Ok(Self {
             socket,
             recv_pool: Mutex::new(Vec::with_capacity(32)),
+            membrane: Arc::new(crate::network::membrane::LockFreeBlacklist::new()),
         })
     }
 
@@ -300,6 +345,18 @@ impl UdpTransport {
         };
 
         let (len, addr) = self.socket.recv_from(&mut buf).await?;
+
+        // --- A Garra Física (Membrane Enforcement) ---
+        // Checagem lock-free puramente O(1) diretamente da L1 Cache!
+        // Dropa pacotes de IPs banidos ANTES de tentar parsear o buffer ou desserializar JSON.
+        if self.membrane.is_banned(&addr.ip()) {
+            buf.truncate(0);
+            self.recv_pool.lock().push(buf);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionAborted,
+                "membrane: packet dropped from banned IP",
+            ));
+        }
 
         if len < 4 {
             // Devolve buffer ao pool

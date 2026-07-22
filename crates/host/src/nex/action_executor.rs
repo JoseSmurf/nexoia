@@ -43,6 +43,7 @@ impl ActionExecutor {
         peer_states: &mut HashMap<SocketAddr, PeerState>,
         reputation: &mut ReputationStore,
         peer_addrs: &HashMap<String, SocketAddr>,
+        membrane: Option<std::sync::Arc<crate::network::membrane::LockFreeBlacklist>>,
     ) -> ExecutionReport {
         let mut report = ExecutionReport {
             logs: Vec::new(),
@@ -88,6 +89,22 @@ impl ActionExecutor {
                         new_value: 0.0, // Simplificado
                     });
                 }
+                ExecutableAction::RunNexBlock { target, body: _ } => {
+                    // TODO(Phase 8): Executar os statements do body no EvidenceEngine.
+                    // Fase 7: Aplicamos o banimento no IP diretamente via Membrane Enforcement
+                    // para estancar o ataque ZK no source de forma O(1) imediata.
+                    if let Some(addr) = peer_addrs.get(target) {
+                        if let Some(mem) = &membrane {
+                            mem.ban_ip(&addr.ip());
+                            report.logs.push(format!("Membrane Enforced: {} banned at socket level", addr.ip()));
+                            
+                            // TODO(Phase 8 - Epidemic Network):
+                            // report.emissions.push(format!("EpidemicAlert: {}", addr.ip()));
+                            // O nó deverá montar um NetworkFrame::EpidemicAlert(addr.ip(), ZkProofHash)
+                            // e mandar por Gossip, imunizando a rede P2P antes do ataque se espalhar.
+                        }
+                    }
+                }
             }
         }
 
@@ -110,7 +127,7 @@ mod tests {
         let peer_addrs = HashMap::new();
 
         let report =
-            ActionExecutor::execute(&actions, &mut peer_states, &mut reputation, &peer_addrs);
+            ActionExecutor::execute(&actions, &mut peer_states, &mut reputation, &peer_addrs, None);
 
         assert_eq!(report.logs.len(), 1);
         assert_eq!(report.logs[0], "Test message");
@@ -130,7 +147,7 @@ mod tests {
         }];
 
         let report =
-            ActionExecutor::execute(&actions, &mut peer_states, &mut reputation, &peer_addrs);
+            ActionExecutor::execute(&actions, &mut peer_states, &mut reputation, &peer_addrs, None);
 
         assert_eq!(report.peer_changes.len(), 1);
         assert!(peer_states.get(&addr).unwrap().consecutive_misses > 0);
@@ -148,7 +165,7 @@ mod tests {
         }];
 
         let report =
-            ActionExecutor::execute(&actions, &mut peer_states, &mut reputation, &peer_addrs);
+            ActionExecutor::execute(&actions, &mut peer_states, &mut reputation, &peer_addrs, None);
 
         assert_eq!(report.reputation_changes.len(), 1);
         assert!(reputation.is_banned("node_b"));
@@ -194,3 +211,4 @@ mod tests {
         assert!(peer_states.get(&addr).unwrap().consecutive_misses > 0);
     }
 }
+

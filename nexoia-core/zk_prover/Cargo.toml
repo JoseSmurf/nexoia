@@ -8,6 +8,7 @@ authors.workspace   = true
 [dependencies]
 sha2      = { workspace = true }
 epoch_mmr = { path = "../epoch_mmr" }
+crossbeam-channel.workspace = true
 
 [features]
 default = []

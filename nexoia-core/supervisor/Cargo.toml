@@ -10,6 +10,7 @@ bio_loop          = { path = "../bio_loop" }
 epoch_mmr         = { path = "../epoch_mmr" }
 crossbeam-channel = { workspace = true }
 sha2              = { workspace = true }
+zk_prover = { version = "0.2.0", path = "../zk_prover" }
 
 [dev-dependencies]
 tempfile = "3"

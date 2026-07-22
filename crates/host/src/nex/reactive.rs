@@ -357,8 +357,8 @@ impl fmt::Display for NetworkEvent {
             }
             NetworkEvent::SessionCreated { addr } => write!(f, "session_created({})", addr),
             NetworkEvent::SessionRemoved { addr } => write!(f, "session_removed({})", addr),
-            NetworkEvent::ZkProofInvalid { addr } => write!(f, "zk_proof_invalid({})", addr),
-            NetworkEvent::MalformedPacket { addr } => write!(f, "malformed_packet({})", addr),
+            NetworkEvent::ZkProofInvalid { peer_id } => write!(f, "zk_proof_invalid({})", peer_id),
+            NetworkEvent::MalformedPacket { peer_id } => write!(f, "malformed_packet({})", peer_id),
         }
     }
 }

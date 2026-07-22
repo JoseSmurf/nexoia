@@ -194,8 +194,8 @@ mod tests {
         // Arrange
         let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
         engine
-            .add_rule(ReactiveRule {
-                trigger: Trigger::HeartbeatMiss { threshold: 3 },
+            .add_rule(ReactiveRule::Legacy {
+                trigger: crate::nex::ast::Trigger::HeartbeatMiss { threshold: 3 },
                 actions: vec![
                     crate::nex::ast::ReactiveAction::Log("Peer inativo".to_string()),
                     crate::nex::ast::ReactiveAction::MarkInactive {
@@ -220,6 +220,7 @@ mod tests {
             &mut peer_states,
             &mut reputation,
             &peer_addrs,
+            None,
         );
 
         // Assert

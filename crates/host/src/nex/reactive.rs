@@ -403,7 +403,7 @@ mod tests {
     fn heartbeat_miss_below_threshold() {
         let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
         engine
-            .add_rule(ReactiveRule {
+            .add_rule(ReactiveRule::Legacy {
                 trigger: Trigger::HeartbeatMiss { threshold: 3 },
                 actions: vec![ReactiveAction::Log("Peer inativo".to_string())],
             })
@@ -420,7 +420,7 @@ mod tests {
     fn reputation_below_triggers() {
         let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
         engine
-            .add_rule(ReactiveRule {
+            .add_rule(ReactiveRule::Legacy {
                 trigger: Trigger::ReputationBelow { threshold: 0.3 },
                 actions: vec![ReactiveAction::Emit("alert".to_string())],
             })
@@ -437,13 +437,13 @@ mod tests {
     fn multiple_rules_same_event() {
         let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
         engine
-            .add_rule(ReactiveRule {
+            .add_rule(ReactiveRule::Legacy {
                 trigger: Trigger::HeartbeatMiss { threshold: 3 },
                 actions: vec![ReactiveAction::Log("Log 1".to_string())],
             })
             .unwrap();
         engine
-            .add_rule(ReactiveRule {
+            .add_rule(ReactiveRule::Legacy {
                 trigger: Trigger::HeartbeatMiss { threshold: 5 },
                 actions: vec![ReactiveAction::Log("Log 2".to_string())],
             })
@@ -460,7 +460,7 @@ mod tests {
     fn mark_inactive_action() {
         let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
         engine
-            .add_rule(ReactiveRule {
+            .add_rule(ReactiveRule::Legacy {
                 trigger: Trigger::HeartbeatMiss { threshold: 3 },
                 actions: vec![ReactiveAction::MarkInactive {
                     peer: "node_a".to_string(),
@@ -483,7 +483,7 @@ mod tests {
     fn adjust_reputation_action() {
         let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
         engine
-            .add_rule(ReactiveRule {
+            .add_rule(ReactiveRule::Legacy {
                 trigger: Trigger::ReputationBelow { threshold: 0.3 },
                 actions: vec![ReactiveAction::AdjustReputation {
                     peer: "node_b".to_string(),
@@ -507,7 +507,7 @@ mod tests {
     fn no_matching_rules() {
         let mut engine = ReactiveEngine::with_layer(NexLayer::Advanced);
         engine
-            .add_rule(ReactiveRule {
+            .add_rule(ReactiveRule::Legacy {
                 trigger: Trigger::PeerConnected,
                 actions: vec![ReactiveAction::Log("Connected".to_string())],
             })
@@ -523,7 +523,7 @@ mod tests {
     #[test]
     fn add_rule_fails_on_basic_layer() {
         let mut engine = ReactiveEngine::with_layer(NexLayer::Basic);
-        let result = engine.add_rule(ReactiveRule {
+        let result = engine.add_rule(ReactiveRule::Legacy {
             trigger: Trigger::HeartbeatMiss { threshold: 3 },
             actions: vec![ReactiveAction::Log("test".to_string())],
         });

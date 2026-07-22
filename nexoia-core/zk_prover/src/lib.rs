@@ -76,7 +76,15 @@ impl StubProver {
             sealed_epochs: Vec::new(),
         }
     }
+}
 
+impl Default for StubProver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StubProver {
     fn verify_witness_internally(
         &self,
         statement: &ZkStatement,
@@ -225,7 +233,6 @@ fn derive_stub_commitment(stmt: &ZkStatement) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worker::{ProverMode, ZkProver};
 
     fn make_seal(epoch: u64, root_byte: u8) -> EpochSeal {
         let mut root = [0u8; 32];
@@ -267,7 +274,7 @@ mod tests {
 
     #[test]
     fn consolidate_registers_seal() {
-        let mut prover = ZkProver::new(ProverMode::Stub);
+        let mut prover = StubProver::new();
         let seal = make_seal(0, 0xAB);
         let result = prover.consolidate(seal);
         assert_eq!(result.epoch, 0);
@@ -277,7 +284,7 @@ mod tests {
 
     #[test]
     fn prove_inclusion_stub_succeeds() {
-        let mut prover = ZkProver::new(ProverMode::Stub);
+        let mut prover = StubProver::new();
         let (seal, stmt, witness) = single_leaf_setup(0xCC, 0);
         prover.consolidate(seal);
 
@@ -293,11 +300,11 @@ mod tests {
         let (seal_a, stmt_a, witness_a) = single_leaf_setup(0xDD, 1);
         let (_, stmt_b, witness_b) = single_leaf_setup(0xDD, 1);
 
-        let mut prover_a = ZkProver::new(ProverMode::Stub);
+        let mut prover_a = StubProver::new();
         prover_a.consolidate(seal_a);
         let proof_a = prover_a.prove_inclusion(stmt_a, witness_a).unwrap();
 
-        let mut prover_b = ZkProver::new(ProverMode::Stub);
+        let mut prover_b = StubProver::new();
         let (seal_b, _, _) = single_leaf_setup(0xDD, 1);
         prover_b.consolidate(seal_b);
         let proof_b = prover_b.prove_inclusion(stmt_b, witness_b).unwrap();
@@ -310,7 +317,7 @@ mod tests {
 
     #[test]
     fn prove_inclusion_fails_for_unknown_epoch() {
-        let prover = ZkProver::new(ProverMode::Stub);
+        let prover = StubProver::new();
         let (_, stmt, witness) = single_leaf_setup(0xEE, 99);
         let result = prover.prove_inclusion(stmt, witness);
         assert!(
@@ -321,7 +328,7 @@ mod tests {
 
     #[test]
     fn prove_inclusion_fails_for_invalid_witness() {
-        let mut prover = ZkProver::new(ProverMode::Stub);
+        let mut prover = StubProver::new();
         let (seal, stmt, _) = single_leaf_setup(0xFF, 0);
         prover.consolidate(seal);
 
@@ -339,7 +346,7 @@ mod tests {
 
     #[test]
     fn nullification_proof_requires_flag() {
-        let mut prover = ZkProver::new(ProverMode::Stub);
+        let mut prover = StubProver::new();
         let (seal, mut stmt, witness) = single_leaf_setup(0xAA, 0);
         prover.consolidate(seal);
 
@@ -352,7 +359,7 @@ mod tests {
 
     #[test]
     fn nullification_proof_succeeds_when_flagged() {
-        let mut prover = ZkProver::new(ProverMode::Stub);
+        let mut prover = StubProver::new();
         let (seal, mut stmt, witness) = single_leaf_setup(0xBB, 0);
         prover.consolidate(seal);
 

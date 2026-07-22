@@ -16,7 +16,6 @@ mod network;
 mod nex;
 mod pipeline;
 mod provenance;
-mod provenance_bridge;
 mod quality;
 mod state;
 mod types;
@@ -38,12 +37,12 @@ use crate::network::transport::{
 };
 use crate::nex::layers::NexLayer;
 use crate::pipeline::run_pipeline;
-use crate::provenance_bridge::ProvenanceBridge;
 use std::collections::HashMap;
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use supervisor::Supervisor;
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 use x25519_dalek::EphemeralSecret;
@@ -462,11 +461,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     ctx.spawn_tasks(&checkpoint_rules);
 
-    // ── Provenance Bridge: Digestor + MMR em background ──
-    let provenance = ProvenanceBridge::spawn(&data_dir);
+    // ── Supervisor: bio-loop + MMR + consolidação + sentidos ──
+    let supervisor = Supervisor::spawn(&data_dir);
     println!(
-        "Provenance:   bio-loop + epoch-mmr bridge active (membrane cap: {})",
+        "Supervisor:   bio-loop + consolidation worker active (membrane cap: {})",
         bio_loop::digest::MEMBRANE_CAPACITY
+    );
+
+    let senses_port = std::env::var("NEXOIA_SENSES_PORT").unwrap_or_else(|_| "9002".to_string());
+    let senses_addr = format!("0.0.0.0:{}", senses_port);
+    let _listener = supervisor::senses::UdpListener::bind(&senses_addr, &supervisor)?;
+    println!(
+        "Senses:       UDP listener on {} (bloco gênesis)",
+        senses_addr
     );
 
     run_pipeline(
@@ -479,7 +486,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &ctx.provenance_nodes,
         Some(Arc::clone(&ctx.reputation)),
         Some(derivation_index),
-        Some(&provenance),
+        Some(&supervisor),
     )
     .await?;
     println!("\nNode running. Press Ctrl+C to stop.");

@@ -372,6 +372,7 @@ version = "0.2.0"
 dependencies = [
  "criterion",
  "crossbeam-channel",
+ "hex",
  "sha2 0.10.9",
 ]
 

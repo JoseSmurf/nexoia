@@ -177,6 +177,11 @@ impl Digestor {
 
                 // Apenas Data conta como processado (heartbeat e shutdown são infra)
                 self.metrics.processed.fetch_add(1, Ordering::Relaxed);
+                let count = self.metrics.processed.load(Ordering::Relaxed);
+                println!(
+                    "\x1b[36m[BIO] mastigado evento #{count}: SHA={:02x}{:02x}{:02x}{:02x}\x1b[0m",
+                    out[0], out[1], out[2], out[3]
+                );
 
                 // `out` agora contém o SHA-256 do payload.
                 // Encaminha para o epoch_mmr via hash_tx (se conectado).

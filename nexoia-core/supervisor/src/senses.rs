@@ -208,10 +208,13 @@ impl UdpListener {
                                     let shard_idx = (ip_hash % RATE_LIMITER_SHARDS) as usize;
 
                                     if rate_limiter.allow(shard_idx) {
-                                        // Hot path: try_send é non-blocking
-                                        if membrane_tx.try_send(Event::Data(data)).is_err() {
-                                            // Canal cheio — backpressure natural.
-                                            // O pacote é perdido, o sistema não morre.
+                                        match membrane_tx.try_send(Event::Data(data)) {
+                                            Ok(()) => {
+                                                println!("\x1b[32m[UDP] INJETADO: {} bytes de {} no bio_loop\x1b[0m", len, src_addr);
+                                            }
+                                            Err(e) => {
+                                                eprintln!("\x1b[31m[UDP] CANAL MORTO: pacote de {} bytes de {} descartado — erro: {}\x1b[0m", len, src_addr, e);
+                                            }
                                         }
                                     }
                                 }

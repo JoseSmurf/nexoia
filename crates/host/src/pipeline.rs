@@ -9,7 +9,6 @@ use crate::network::epa::SharedEPA;
 use crate::network::identity::NodeIdentity;
 use crate::network::persistence;
 use crate::network::transport::{PeerList, TrustedPeerList};
-use crate::provenance_bridge::ProvenanceBridge;
 use crate::state::State;
 use crate::types::EvidenceProvider;
 use serde::Serialize;
@@ -17,6 +16,7 @@ use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+use supervisor::Supervisor;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize)]
@@ -40,7 +40,7 @@ pub struct Manifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lgpd_hash: Option<String>,
     /// Raiz de Merkle da época atual do MMR (proveniência criptográfica).
-    /// Presente quando o pipeline recebe um `ProvenanceBridge` ativo.
+    /// Presente quando o pipeline recebe um `Supervisor` ativo.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub epoch_root: Option<String>,
 }
@@ -56,7 +56,7 @@ pub async fn run_pipeline(
     provenance_nodes: &Arc<RwLock<Vec<crate::provenance::ProvenanceNode>>>,
     reputation: Option<Arc<RwLock<crate::network::reputation::ReputationStore>>>,
     derivation_index: Option<Arc<RwLock<crate::provenance::DerivationIndex>>>,
-    provenance: Option<&ProvenanceBridge>,
+    provenance: Option<&Supervisor>,
 ) -> Result<(), Box<dyn Error>> {
     let limiter = crate::defense::RateLimiter::new(100, Duration::from_secs(60));
     let engine = crate::ai::EvidenceEngine::new(0.30);
@@ -136,7 +136,7 @@ pub async fn run_pipeline(
         crate::types::EvidenceStrength::Unverifiable => "local",
     };
 
-    let out_dir = data_path;
+    let out_dir = data_path.parent().unwrap_or(data_path);
     write_text(out_dir.join("state.json"), &state_json)?;
     let state_hash = canonical_hash(&state_json);
 
@@ -156,7 +156,7 @@ pub async fn run_pipeline(
 
     // ── Provenance Bridge: sela época atual e obtém raiz do MMR ──
     let epoch_root = provenance.and_then(|p| {
-        let seal = p.seal_current_epoch()?;
+        let seal = p.seal_epoch()?;
         let hex_root = hex::encode(seal.root);
         println!(
             "Provenance:   Epoch {} sealed, root={}, leaves={}",
@@ -234,7 +234,7 @@ pub async fn run_pipeline(
         let project_dir = std::env::var("CARGO_MANIFEST_DIR")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let data_dir = data_path.to_path_buf();
+        let data_dir = out_dir.to_path_buf();
         let mut iteration_log = crate::nex::iteration::IterationLog::new(&data_dir);
         let mut engine = crate::nex::behavior_engine::BehaviorEngine::new(&data_dir, &project_dir);
 

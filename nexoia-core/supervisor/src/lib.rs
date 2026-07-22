@@ -1,7 +1,9 @@
+pub mod executor;
 pub mod senses;
 pub mod subconscious;
 pub mod supervisor;
 
+pub use executor::{Executor, ExecutorError, Patch, PatchSlot, PatchTable};
 pub use senses::UdpListener;
 pub use subconscious::HnswStore;
 pub use supervisor::{
